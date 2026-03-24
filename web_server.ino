@@ -1,22 +1,4 @@
-// ==================== Web服务器和页面处理 ====================
-
-// 前向声明
-void handleRootPage(WiFiClient client);
-void handleLogsPage(WiFiClient client, String request);
-void handleStatusPage(WiFiClient client);
-void handleClientsPage(WiFiClient client);
-void handleSelectClient(WiFiClient client, String request);
-void handleClientPage(WiFiClient client, String request);
-void handleConfigPage(WiFiClient client);
-void handleSaveConfig(WiFiClient client);
-void handleDownloadLog(WiFiClient client, String request);
-void handlePreviewLog(WiFiClient client, String request);
-void handleClearLog(WiFiClient client);
-void handlePowerControl(WiFiClient client, String request);
-void handleNotFound(WiFiClient client);
-void handleSerialData(WiFiClient client);
-String formatFileSize(unsigned long bytes);
-
+﻿// ==================== Web服务器和页面处理 ====================
 void initWebServer() {
   if (webServerEnabled && (wifiConnected || currentMode == MODE_SERVER)) {
     webServer.begin();
@@ -32,23 +14,32 @@ void handleWebServer() {
   
   WiFiClient client = webServer.available();
   if (client) {
+    // 读取Web客户端请求
     String request = client.readStringUntil('\r');
     client.flush();
     
-    if (request.indexOf("GET / ") >= 0) handleRootPage(client);
-    else if (request.indexOf("GET /serial") >= 0) handleSerialData(client);
-    else if (request.indexOf("GET /logs") >= 0) handleLogsPage(client, request);
-    else if (request.indexOf("GET /preview") >= 0) handlePreviewLog(client, request);
-    else if (request.indexOf("GET /status ") >= 0) handleStatusPage(client);
-    else if (request.indexOf("GET /clients") >= 0) handleClientsPage(client);
-    else if (request.indexOf("GET /selectclient") >= 0) handleSelectClient(client, request);
-    else if (request.indexOf("GET /client") >= 0) handleClientPage(client, request);
-    else if (request.indexOf("GET /config ") >= 0) handleConfigPage(client);
-    else if (request.indexOf("POST /saveconfig") >= 0) handleSaveConfig(client);
-    else if (request.indexOf("GET /download") >= 0) handleDownloadLog(client, request);
-    else if (request.indexOf("GET /clear ") >= 0) handleClearLog(client);
-    else if (request.indexOf("POST /power") >= 0) handlePowerControl(client, request);
-    else handleNotFound(client);
+    // 路由处理
+    if (request.indexOf("GET / ") >= 0) {
+      handleRootPage(client);
+    } else if (request.indexOf("GET /logs") >= 0) {
+      handleLogsPage(client, request);
+    } else if (request.indexOf("GET /status ") >= 0) {
+      handleStatusPage(client);
+    } else if (request.indexOf("GET /client") >= 0) {
+      handleClientPage(client, request);
+    } else if (request.indexOf("GET /config ") >= 0) {
+      handleConfigPage(client);
+    } else if (request.indexOf("POST /saveconfig") >= 0) {
+      handleSaveConfig(client);
+    } else if (request.indexOf("GET /download") >= 0) {
+      handleDownloadLog(client, request);
+    } else if (request.indexOf("GET /clear ") >= 0) {
+      handleClearLog(client);
+    } else if (request.indexOf("POST /power") >= 0) {
+      handlePowerControl(client, request);
+    } else {
+      handleNotFound(client);
+    }
     
     delay(10);
     client.stop();
@@ -58,188 +49,120 @@ void handleWebServer() {
 void handleRootPage(WiFiClient client) {
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
-  html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-  html += "<title>ESP32 UART 服务器</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-  html += ".container{max-width:800px;margin:0 auto;background:white;padding:20px;border-radius:10px;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;}";
-  html += "h3{font-size:18px;}";
-  html += ".menu{margin:20px 0;}";
-  html += ".menu a{display:inline-block;padding:15px 20px;margin:5px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += ".menu a:hover{background:#45a049;}";
-  html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:15px;margin:15px 0;}";
-  html += ".serial-box{background:#1e1e1e;border:1px solid #ddd;border-radius:5px;padding:10px;margin:15px 0;height:200px;overflow-y:scroll;font-family:monospace;font-size:14px;color:#0f0;white-space:pre-wrap;}";
-  html += "</style></head><body>";
-  html += "<div class='container'>";
-  html += "<h1>📡 ESP32 UART 服务器</h1>";
-  html += "<div class='info'>";
-  html += "<strong>版本:</strong> " + String(FIRMWARE_VERSION) + " | ";
-  html += "<strong>模式:</strong> " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + " | ";
-  html += "<strong>WiFi:</strong> " + String(wifiConnected ? "已连接" : "未连接") + " | ";
-  html += "<strong>SD卡:</strong> " + String(sdCardReady ? "正常" : "异常");
-  html += "</div>";
-  
-  // 实时串口显示
-  html += "<h3>📺 实时串口数据</h3>";
-  html += "<div class='serial-box' id='serialData'>等待数据...</div>";
-  
-  // 自动刷新脚本
-  html += "<script>";
-  html += "setInterval(function(){";
-  html += "  var xhr=new XMLHttpRequest();";
-  html += "  xhr.open('GET','/serial',true);";
-  html += "  xhr.onreadystatechange=function(){";
-  html += "    if(xhr.readyState==4 && xhr.status==200){";
-  html += "      document.getElementById('serialData').innerHTML=xhr.responseText;";
-  html += "    }";
-  html += "  };";
-  html += "  xhr.send();";
-  html += "},500);";
-  html += "</script>";
-  
-  html += "<div class='menu'>";
-  html += "<a href='/logs'>📋 日志</a>";
-  html += "<a href='/status'>📊 状态</a>";
-  html += "<a href='/config'>⚙️ 配置</a>";
-  if (currentMode == MODE_SERVER) {
-    html += "<a href='/clients'>👥 客户端</a>";
-  }
-  html += "</div>";
-  
-  // 电源控制
-  html += "<div class='info'><h3>🔋 电源控制</h3>";
-  html += "<form action='/power' method='post' style='display:inline;'>";
-  html += "<input type='hidden' name='action' value='on'><input type='submit' value='开机'>";
-  html += "</form> ";
-  html += "<form action='/power' method='post' style='display:inline;'>";
-  html += "<input type='hidden' name='action' value='off'><input type='submit' value='关机'>";
-  html += "</form> ";
-  html += "<form action='/power' method='post' style='display:inline;'>";
-  html += "<input type='hidden' name='action' value='reset'><input type='submit' value='复位'>";
-  html += "</form></div>";
-  html += "</div></body></html>";
-  client.print(html);
-html += "</form></div>";
-  html += "</div></body></html>";
-  client.print(html);
-}
-
-// 前向声明
-String formatFileSize(unsigned long bytes);
-void handleSerialData(WiFiClient client);
-void handleClientsPage(WiFiClient client);
-void handleSelectClient(WiFiClient client, String request);
-void handlePowerControl(WiFiClient client, String request);
-
-void handleLogsPage(WiFiClient client, String request) {
-  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
-  html += "<title>ESP32 UART Log</title>";
+  html += "<title>ESP32 UART 服务器</title>";
   html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
   html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
   html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
   html += "h2{font-size:20px;}";
-  html += ".file-list{margin:20px 0;}";
-  html += ".file-item{padding:12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;}";
-  html += ".file-item:hover{background:#f9f9f9;}";
-  html += ".file-name{flex:1;min-width:150px;}";
-  html += ".file-name a{text-decoration:none;color:#2196F3;font-size:16px;}";
-  html += ".file-name a:hover{text-decoration:underline;}";
-  html += ".file-actions{display:flex;gap:8px;}";
-  html += ".file-actions a{padding:5px 12px;border-radius:4px;text-decoration:none;font-size:14px;}";
-  html += ".btn-preview{background:#2196F3;color:white;}";
-  html += ".btn-preview:hover{background:#1976D2;}";
-  html += ".btn-download{background:#4CAF50;color:white;}";
-  html += ".btn-download:hover{background:#45a049;}";
-  html += ".file-size{color:#666;font-size:14px;margin-left:10px;}";
-  html += ".back{margin-top:20px;}";
-  html += ".back a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += ".back a:hover{background:#45a049;}";
-  html += ".error{background:#ffebee;border-left:4px solid #f44336;padding:15px;margin:15px 0;}";
+  html += "h3{font-size:18px;}";
+  html += ".menu{margin:20px 0;}";
+  html += ".menu a{display:block;padding:15px 20px;margin:10px 0;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;text-align:center;font-size:18px;}";
+  html += ".menu a:hover{background:#45a049;}";
+  html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:15px;margin:15px 0;font-size:16px;}";
+  html += "strong{font-size:16px;}";
   html += "@media screen and (min-width: 600px) {";
   html += ".container{max-width:800px;padding:20px;}";
+  html += ".menu a{display:inline-block;margin:5px;}";
   html += "}";
   html += "</style></head><body>";
   html += "<div class='container'>";
-  html += "<h1>Log Files</h1>";
+  html += "<h1>📡 ESP32 UART 服务器</h1>";
+  html += "<div class='info'>";
+  html += "<strong>固件版本:</strong> " + String(FIRMWARE_VERSION) + "<br>";
+  html += "<strong>运行模式:</strong> " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "<br>";
+  html += "<strong>WiFi状态:</strong> " + String(wifiConnected ? "已连接" : "未连接") + "<br>";
+  html += "<strong>SD卡状态:</strong> " + String(sdCardReady ? "正常" : "异常") + "<br>";
+  html += "<strong>UART1↔UART2透传:</strong> 已启用<br>";  // 透传功能
+  html += "</div>";
+  html += "<div class='menu'>";
+  html += "<a href='/logs'>📋 查看日志</a>";
+  html += "<a href='/status'>📊 系统状态</a>";
+  html += "<a href='/config'>⚙️ 系统配置</a>";
+  html += "</div>";
   
-  if (!sdCardReady) {
-    html += "<div class='error'>";
-    html += "<strong>Error:</strong> SD card not ready";
-    html += "</div>";
-  } else {
-    String dirPath = "/server";
-    int dirIndex = request.indexOf("dir=");
-    if (dirIndex > 0) {
-      int dirEnd = request.indexOf(" ", dirIndex);
-      if (dirEnd < 0) dirEnd = request.indexOf("&", dirIndex);
-      if (dirEnd < 0) dirEnd = request.length();
-      dirPath = request.substring(dirIndex + 4, dirEnd);
-      dirPath.replace("%2F", "/");
-    }
-    
-    html += "<h2>Directory: " + dirPath + "</h2>";
-    html += "<div class='file-list'>";
-    
-    File dir = SD.open(dirPath);
-    if (dir && dir.isDirectory()) {
-      bool hasFiles = false;
-      
-      while (true) {
-        File entry = dir.openNextFile();
-        if (!entry) break;
-        
-        hasFiles = true;
-        String entryName = String(entry.name());
-        String entryPath = String(entry.path());
-        
-        if (entry.isDirectory()) {
-          html += "<div class='file-item'>";
-          html += "<div class='file-name'>";
-          html += "<a href='/logs?dir=" + entryPath + "'>📁 " + entryName + "</a>";
-          html += "</div>";
-          html += "</div>";
-        } else {
-          String fileSize = formatFileSize(entry.size());
-          html += "<div class='file-item'>";
-          html += "<div class='file-name'>📄 " + entryName + "</div>";
-          html += "<div class='file-actions'>";
-          html += "<a class='btn-preview' href='/preview?file=" + entryPath + "'>Preview</a>";
-          html += "<a class='btn-download' href='/download?file=" + entryPath + "'>Download</a>";
-          html += "</div>";
-          html += "<div class='file-size'>" + fileSize + "</div>";
-          html += "</div>";
-        }
-        entry.close();
-      }
-      
-      if (!hasFiles) {
-        html += "<div class='file-item'><div class='file-name'>Empty directory</div></div>";
-      }
-    } else {
-      html += "<div class='error'>";
-      html += "<strong>Error:</strong> Cannot open directory: " + dirPath;
-      html += "</div>";
-    }
-    
-    if (dir) dir.close();
-    html += "</div>";
-  }
-  
-  html += "<div class='back'><a href='/'>Back to Home</a></div>";
+  // 电源控制
+  html += "<div class='info'>";
+  html += "<h3>🔋 电源控制</h3>";
+  html += "<form action='/power' method='post'>";
+  html += "<input type='hidden' name='action' value='on'>";
+  html += "<input type='submit' value='开机' style='width:30%;margin:5px;'>";
+  html += "</form>";
+  html += "<form action='/power' method='post'>";
+  html += "<input type='hidden' name='action' value='off'>";
+  html += "<input type='submit' value='关机' style='width:30%;margin:5px;'>";
+  html += "</form>";
+  html += "<form action='/power' method='post'>";
+  html += "<input type='hidden' name='action' value='trigger'>";
+  html += "<input type='submit' value='触发关机' style='width:30%;margin:5px;'>";
+  html += "</form>";
+  html += "<form action='/power' method='post'>";
+  html += "<input type='hidden' name='action' value='reset'>";
+  html += "<input type='submit' value='复位' style='width:30%;margin:5px;'>";
+  html += "</form>";
+  html += "</div>";
   html += "</div>";
   html += "</body></html>";
   client.print(html);
 }
 
-String formatFileSize(unsigned long bytes) {
-  if (bytes < 1024) {
-    return String(bytes) + " B";
-  } else if (bytes < 1024 * 1024) {
-    return String(bytes / 1024.0, 1) + " KB";
+void handleLogsPage(WiFiClient client, String request) {
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
+  html += "<title>ESP32 UART 日志</title>";
+  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
+  html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
+  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
+  html += "h2{font-size:20px;}";
+  html += ".file-list{margin:20px 0;}";
+  html += ".file-item{padding:10px;border-bottom:1px solid #eee;}";
+  html += ".file-item a{text-decoration:none;color:#333;}";
+  html += ".file-item a:hover{color:#4CAF50;}";
+  html += ".size{float:right;color:#666;}";
+  html += ".back{margin-top:20px;}";
+  html += ".back a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
+  html += ".back a:hover{background:#45a049;}";
+  html += "@media screen and (min-width: 600px) {";
+  html += ".container{max-width:800px;padding:20px;}";
+  html += "}";
+  html += "</style></head><body>";
+  html += "<div class='container'>";
+  html += "<h1>📋 日志文件</h1>";
+  
+  // 检查SD卡状态
+  if (!sdCardReady) {
+    html += "<div style='background:#ffebee;border-left:4px solid #f44336;padding:15px;margin:15px 0;'>";
+    html += "<strong>错误:</strong> SD卡未就绪，无法查看日志文件";
+    html += "</div>";
   } else {
-    return String(bytes / (1024.0 * 1024.0), 1) + " MB";
+    // 列出服务器日志目录
+    html += "<h2>服务器日志</h2>";
+    html += "<div class='file-list'>";
+    File root = SD.open("/server");
+    if (root) {
+      while (true) {
+        File entry = root.openNextFile();
+        if (!entry) break;
+        if (entry.isDirectory()) {
+          String dirName = entry.name();
+          html += "<div class='file-item'><a href='/logs?dir=" + dirName + "'>? " + dirName + "</a></div>";
+        }
+        entry.close();
+      }
+      root.close();
+    } else {
+      html += "<div style='background:#ffebee;border-left:4px solid #f44336;padding:15px;margin:15px 0;'>";
+      html += "<strong>错误:</strong> 无法打开服务器日志目录";
+      html += "</div>";
+    }
+    html += "</div>";
   }
+  
+  html += "<div class='back'><a href='/'>返回首页</a></div>";
+  html += "</div>";
+  html += "</body></html>";
+  client.print(html);
 }
 
 void handleStatusPage(WiFiClient client) {
@@ -543,16 +466,8 @@ void handleDownloadLog(WiFiClient client, String request) {
   // 解析文件路径
   int fileStart = request.indexOf("file=") + 5;
   int fileEnd = request.indexOf("&", fileStart);
-  int spaceEnd = request.indexOf(" ", fileStart);
-  if (fileEnd == -1 || (spaceEnd != -1 && spaceEnd < fileEnd)) {
-    fileEnd = spaceEnd;
-  }
   if (fileEnd == -1) fileEnd = request.length();
   String filePath = request.substring(fileStart, fileEnd);
-  
-  // URL解码（处理%2F等）
-  filePath.replace("%2F", "/");
-  filePath.replace("%20", " ");
   
   // 打开文件
   File file = SD.open(filePath);
@@ -570,102 +485,11 @@ void handleDownloadLog(WiFiClient client, String request) {
     }
     file.close();
   } else {
+    // 文件不存在
     client.println("HTTP/1.1 404 Not Found");
     client.println("Content-Type: text/html");
     client.println();
-    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - File Not Found</h1><p>The requested file does not exist</p></body></html>");
-  }
-}
-
-void handlePreviewLog(WiFiClient client, String request) {
-  int fileStart = request.indexOf("file=") + 5;
-  int fileEnd = request.indexOf("&", fileStart);
-  int spaceEnd = request.indexOf(" ", fileStart);
-  if (fileEnd == -1 || (spaceEnd != -1 && spaceEnd < fileEnd)) {
-    fileEnd = spaceEnd;
-  }
-  if (fileEnd == -1) fileEnd = request.length();
-  String filePath = request.substring(fileStart, fileEnd);
-  
-  filePath.replace("%2F", "/");
-  filePath.replace("%20", " ");
-  
-  String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-  
-  File file = SD.open(filePath);
-  if (file) {
-    String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-    html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
-    html += "<title>Preview: " + fileName + "</title>";
-    html += "<style>";
-    html += "body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-    html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
-    html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:20px;word-break:break-all;}";
-    html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:10px;margin:10px 0;font-size:14px;}";
-    html += ".preview-box{background:#1e1e1e;border:1px solid #ddd;border-radius:5px;padding:15px;margin:15px 0;";
-    html += "height:400px;overflow-y:auto;font-family:monospace;font-size:13px;color:#d4d4d4;white-space:pre-wrap;word-wrap:break-word;}";
-    html += ".actions{margin:15px 0;}";
-    html += ".actions a{display:inline-block;padding:10px 20px;margin:5px;border-radius:5px;text-decoration:none;color:white;}";
-    html += ".btn-download{background:#4CAF50;}";
-    html += ".btn-download:hover{background:#45a049;}";
-    html += ".btn-back{background:#2196F3;}";
-    html += ".btn-back:hover{background:#1976D2;}";
-    html += "@media screen and (min-width: 600px) {.container{max-width:900px;padding:20px;}.preview-box{height:500px;}}";
-    html += "</style></head><body>";
-    html += "<div class='container'>";
-    html += "<h1>📄 " + fileName + "</h1>";
-    html += "<div class='info'>";
-    html += "<strong>Path:</strong> " + filePath + "<br>";
-    html += "<strong>Size:</strong> " + formatFileSize(file.size());
-    html += "</div>";
-    
-    html += "<div class='actions'>";
-    html += "<a class='btn-download' href='/download?file=" + filePath + "'>Download</a>";
-    html += "<a class='btn-back' href='/logs'>Back to List</a>";
-    html += "</div>";
-    
-    html += "<div class='preview-box'>";
-    
-    const int maxPreviewSize = 8192;
-    int bytesRead = 0;
-    while (file.available() && bytesRead < maxPreviewSize) {
-      char c = file.read();
-      bytesRead++;
-      if (c == '<') html += "&lt;";
-      else if (c == '>') html += "&gt;";
-      else if (c == '&') html += "&amp;";
-      else if (c == '"') html += "&quot;";
-      else if (c == '\'') html += "&#39;";
-      else if (c == '\r') {}
-      else html += c;
-    }
-    
-    if (file.available()) {
-      html += "\n\n... [File truncated, showing first " + String(bytesRead) + " bytes]";
-    }
-    
-    html += "</div>";
-    html += "</div>";
-    html += "</body></html>";
-    client.print(html);
-    file.close();
-  } else {
-    String html = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n";
-    html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>File Not Found</title>";
-    html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
-    html += ".error{background:#ffebee;border-left:4px solid #f44336;padding:20px;margin:20px 0;border-radius:5px;}";
-    html += "a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;margin-top:15px;}";
-    html += "</style></head><body>";
-    html += "<div class='error'>";
-    html += "<h1>404 - File Not Found</h1>";
-    html += "<p>File: " + filePath + "</p>";
-    html += "<a href='/logs'>Back to Log List</a>";
-    html += "</div>";
-    html += "</body></html>";
-    client.print(html);
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 文件未找到</h1><p>请求的文件不存在</p></body></html>");
   }
 }
 
@@ -761,82 +585,4 @@ void handleNotFound(WiFiClient client) {
   client.println("Content-Type: text/html");
   client.println();
   client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 页面未找到</h1><p>请求的页面不存在</p><a href='/'>返回首页</a></body></html>");
-}
-// 处理实时串口数据请求
-void handleSerialData(WiFiClient client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/plain");
-  client.println("Access-Control-Allow-Origin: *");
-  client.println();
-  
-  String serialData = "";
-  if (uart2BufferAvailable()) {
-    while (uart2BufferAvailable() && serialData.length() < 1000) {
-      int ch = readUART2Buffer();
-      if (ch >= 0) {
-        if (ch == '\n') serialData += "<br>";
-        else if (ch == '\r') {}
-        else if (ch == '<') serialData += "&lt;";
-        else if (ch == '>') serialData += "&gt;";
-        else serialData += (char)ch;
-      }
-    }
-  }
-  
-  if (serialData.length() == 0) serialData = "等待数据...";
-  client.print(serialData);
-}
-
-// 客户端管理页面
-void handleClientsPage(WiFiClient client) {
-  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-  html += "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1.0'>";
-  html += "<title>客户端管理</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;}.container{max-width:800px;margin:0 auto;background:white;padding:20px;border-radius:10px;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;}";
-  html += ".client-item{background:#f9f9f9;border:1px solid #ddd;border-radius:5px;padding:15px;margin:10px 0;}";
-  html += ".client-item.selected{border:2px solid #4CAF50;background:#e8f5e9;}";
-  html += ".client-actions a{display:inline-block;padding:8px 15px;margin:5px;background:#2196F3;color:white;text-decoration:none;border-radius:3px;}";
-  html += ".back{margin-top:20px;}.back a{padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += "</style></head><body><div class='container'>";
-  html += "<h1>👥 客户端管理</h1>";
-  
-  if (currentMode == MODE_SERVER) {
-    int clientCount = getConnectedClientCount();
-    html += "<h2>已连接: " + String(clientCount) + "</h2>";
-    
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-      if (serverClients[i] && serverClients[i].connected()) {
-        String selectedClass = (selectedClientIndex == i) ? " selected" : "";
-        html += "<div class='client-item" + selectedClass + "'>";
-        html += "<strong>客户端 " + String(i) + "</strong> - " + serverClients[i].remoteIP().toString();
-        if (selectedClientIndex == i) html += " <span style='color:#4CAF50;'>✓ 透传中</span>";
-        html += "<br><div class='client-actions'>";
-        html += "<a href='/selectclient?id=" + String(i) + "' style='background:#4CAF50;'>选择</a>";
-        html += "</div></div>";
-      }
-    }
-    
-    if (selectedClientIndex >= 0) {
-      html += "<p><a href='/selectclient?id=-1' style='color:#f44336;'>取消选择</a></p>";
-    }
-  } else {
-    html += "<p>仅在服务器模式下可用</p>";
-  }
-  
-  html += "<div class='back'><a href='/'>返回</a></div></div></body></html>";
-  client.print(html);
-}
-
-void handleSelectClient(WiFiClient client, String request) {
-  int idIndex = request.indexOf("id=") + 3;
-  int idEnd = request.indexOf(" ", idIndex);
-  if (idEnd < 0) idEnd = request.length();
-  int clientId = request.substring(idIndex, idEnd).toInt();
-  
-  selectClient(clientId);
-  
-  client.println("HTTP/1.1 302 Found");
-  client.println("Location: /clients");
-  client.println();
 }
