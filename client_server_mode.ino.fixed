@@ -1,0 +1,331 @@
+﻿// ==================== 智能配网 ====================
+void startConfigMode() {
+  Serial.println("\n进入智能配网模式...");
+  
+  wm.resetSettings();  // 重置WiFi设置
+  wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+  wm.setConfigPortalTimeout(300);  // 5分钟超时
+  
+  if (!wm.startConfigPortal(wifimanager_ssid, wifimanager_password)) {
+    Serial.println("配网超时，使用默认配置");
+  } else {
+    Serial.println("配网成功，重启设备...");
+    ESP.restart();
+  }
+}
+
+void configModeCallback(WiFiManager *myWiFiManager) {
+  Serial.println("进入配网模式");
+  setLED(CRGB(255, 255, 0));  // 黄色LED
+}
+
+// ==================== 客户端模式 ====================
+void initClientMode() {
+  Serial.println("初始化客户端模式...");
+  
+  // 检查配置模式触发引脚
+  pinMode(CONFIG_MODE_PIN, INPUT_PULLUP);
+  if (digitalRead(CONFIG_MODE_PIN) == LOW) {
+    Serial.println("检测到配置模式触发，进入智能配网...");
+    startConfigMode();
+  }
+  
+  // 连接WiFi
+  WiFi.begin(client_wifi_ssid, client_wifi_password);
+  
+  unsigned long startTime = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    if (debugMode) {
+      Serial.print(".");
+    }
+    
+    // 超时处理
+    if (millis() - startTime > 15000) {
+      Serial.println("\nWiFi连接超时，启动智能配网...");
+      startConfigMode();
+      return;
+    }
+  }
+  
+  wifiConnected = true;
+  Serial.println("\nWiFi连接成功");
+  Serial.println("  客户端IP: " + WiFi.localIP().toString());
+  
+  // 连接服务器
+  connectToServer();
+}
+
+void connectToServer() {
+  Serial.print("连接服务器 (" + String(server_ip) + ":" + String(server_port) + ")...");
+  
+  if (tcpClient.connect(server_ip, server_port)) {
+    tcpConnected = true;
+    Serial.println(" 成功");
+    
+    // 发送客户端ID
+    String clientInfo = "CLIENT_ID:" + client_id + "|TIMESTAMP:" + String(millis());
+    tcpClient.println(clientInfo);
+    
+    if (debugMode) {
+      Serial.println("  客户端ID: " + client_id);
+    }
+  } else {
+    tcpConnected = false;
+    Serial.println(" 失败");
+  }
+}
+
+void runClientMode() {
+  static unsigned long lastConnectAttempt = 0;
+  const unsigned long reconnectionInterval = 5000; // 5秒重连间隔
+  
+  // 检查WiFi连接
+  if (!wifiConnected) {
+    Serial.println("WiFi断开，尝试重连...");
+    WiFi.begin(client_wifi_ssid, client_wifi_password);
+    
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      if (millis() - startTime > 10000) {
+        Serial.println("WiFi重连失败");
+        break;
+      }
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnected = true;
+      Serial.println("WiFi重连成功");
+    }
+  }
+  
+  // 检查TCP连接，添加重连间隔
+  if (!tcpConnected) {
+    if (millis() - lastConnectAttempt > reconnectionInterval) {
+      connectToServer();
+      lastConnectAttempt = millis();
+    }
+  }
+  
+  // 处理TCP接收数据
+  if (tcpConnected && tcpClient.available()) {
+    String data = tcpClient.readStringUntil('\n');
+    data.trim();
+    
+    if (data.length() > 0) {
+      // 转发到UART2
+      Serial2.println(data);
+      
+      // 记录日志
+      if (logToSD) {
+        saveDataToSD("[服务器] " + data, client_id, false);
+      }
+      
+      if (debugMode) {
+        Serial.println("[服务器] " + data);
+      }
+    }
+  }
+  
+  // 检查TCP连接状态
+  if (tcpConnected && !tcpClient.connected()) {
+    Serial.println("TCP连接断开");
+    tcpClient.stop();
+    tcpConnected = false;
+  }
+  
+  // 处理UART2数据并发送到服务器
+  if (tcpConnected && Serial2.available()) {
+    String data = Serial2.readStringUntil('\n');
+    data.trim();
+    
+    if (data.length() > 0) {
+      // 格式化数据：CLIENT_ID:xxx|TIMESTAMP:xxx|DATA:xxx
+      String formattedData = "CLIENT_ID:" + client_id + "|TIMESTAMP:" + String(millis()) + "|DATA:" + data;
+      tcpClient.println(formattedData);
+      
+      // 记录日志
+      if (logToSD) {
+        saveDataToSD("[UART2] " + data, client_id, false);
+      }
+      
+      if (debugMode) {
+        Serial.println("[UART2] " + data);
+      }
+    }
+  }
+}
+
+// ==================== 服务器模式 ====================
+void initServerMode() {
+  Serial.println("初始化服务器模式...");
+  
+  // 配置WiFi AP
+  WiFi.mode(WIFI_AP);
+  IPAddress localIP(192, 168, 1, 1);  // 固定服务器IP
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(localIP, gateway, subnet);
+  
+  if (WiFi.softAP(ap_ssid, ap_password)) {
+    wifiConnected = true;
+    Serial.println("WiFi AP启动成功");
+    Serial.println("  AP SSID: " + String(ap_ssid));
+    Serial.println("  AP IP: " + WiFi.softAPIP().toString());
+  } else {
+    wifiConnected = false;
+    Serial.println("WiFi AP启动失败");
+  }
+  
+  // 启动TCP服务器
+  tcpServer.begin();
+  Serial.println("TCP服务器启动成功");
+  Serial.println("  监听端口: " + String(server_listen_port));
+  
+  // 初始化客户端数组
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i]) {
+      serverClients[i].stop();
+    }
+  }
+}
+
+void runServerMode() {
+  // 处理新客户端连接
+  WiFiClient newClient = tcpServer.available();
+  if (newClient) {
+    // 寻找空闲客户端槽
+    int freeSlot = -1;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if (!serverClients[i] || !serverClients[i].connected()) {
+        freeSlot = i;
+        break;
+      }
+    }
+    
+    if (freeSlot >= 0) {
+      serverClients[freeSlot] = newClient;
+      Serial.println("[客户端 " + String(freeSlot) + "] 已连接: " + newClient.remoteIP().toString());
+      
+      // 初始化客户端串口数据
+      clientSerialData[freeSlot] = "// 串口数据记录\n";
+      
+      // 发送欢迎消息
+      serverClients[freeSlot].println("欢迎连接ESP32 UART服务器");
+    } else {
+      // 客户端已满
+      Serial.println("客户端连接数达到上限");
+      newClient.println("服务器客户端已满");
+      newClient.stop();
+    }
+  }
+  
+  // 处理已连接客户端
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      // 处理客户端发送的数据
+      if (serverClients[i].available()) {
+        String data = serverClients[i].readStringUntil('\n');
+        data.trim();
+        
+        if (data.length() > 0) {
+          // 解析客户端ID
+          String clientId = parseClientId(data);
+          
+          // 提取实际数据
+          int dataIndex = data.indexOf("|DATA:");
+          String actualData = (dataIndex >= 0) ? data.substring(dataIndex + 6) : data;
+          
+          // 转发到UART2
+          Serial2.println(actualData);
+          
+          // 更新客户端串口数据记录
+          clientSerialData[i] += "[客户端] " + actualData + "\n";
+          if (clientSerialData[i].length() > 2000) {
+            // 保留最新50行
+            int lines = 0;
+            int pos = 0;
+            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
+              lines++;
+              pos++;
+            }
+            if (pos != -1) {
+              clientSerialData[i] = clientSerialData[i].substring(pos);
+            }
+          }
+          
+          // 记录日志
+          if (logToSD) {
+            saveDataToSD("[客户端 " + String(i) + "] " + data, clientId, true);
+          }
+          
+          if (debugMode) {
+            Serial.println("[客户端 " + String(i) + "] " + data);
+          }
+        }
+      }
+      
+      // 处理UART2数据并发送给客户端
+      if (Serial2.available()) {
+        String data = Serial2.readStringUntil('\n');
+        data.trim();
+        
+        if (data.length() > 0) {
+          serverClients[i].println(data);
+          
+          // 更新客户端串口数据记录
+          clientSerialData[i] += "[UART2] " + data + "\n";
+          if (clientSerialData[i].length() > 2000) {
+            // 保留最新50行
+            int lines = 0;
+            int pos = 0;
+            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
+              lines++;
+              pos++;
+            }
+            if (pos != -1) {
+              clientSerialData[i] = clientSerialData[i].substring(pos);
+            }
+          }
+          
+          // 记录日志
+          if (logToSD) {
+            String clientId = "SERVER";
+            saveDataToSD("[UART2] " + data, clientId, true);
+          }
+          
+          if (debugMode) {
+            Serial.println("[UART2] " + data);
+          }
+        }
+      }
+    } else if (serverClients[i]) {
+      // 客户端断开连接
+      Serial.println("[客户端 " + String(i) + "] 已断开");
+      serverClients[i].stop();
+    }
+  }
+}
+
+String parseClientId(String data) {
+  // 从数据中解析客户端ID
+  int idStart = data.indexOf("CLIENT_ID:");
+  if (idStart >= 0) {
+    int idEnd = data.indexOf("|", idStart);
+    if (idEnd >= 0) {
+      return data.substring(idStart + 10, idEnd);
+    }
+  }
+  return "UNKNOWN";
+}
+
+int getConnectedClientCount() {
+  int count = 0;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      count++;
+    }
+  }
+  return count;
+}

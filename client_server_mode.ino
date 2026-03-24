@@ -1,0 +1,338 @@
+// ==================== Smart WiFi Config ====================
+void startConfigMode() {
+  Serial.println("\nEntering WiFi config mode...");
+  Serial.println("Please connect to WiFi: " + String(wifimanager_ssid));
+  Serial.println("Password: " + String(wifimanager_password));
+  Serial.println("Then visit: http://192.168.4.1");
+  Serial.println("You can continue using AT commands during config");
+  Serial.println("Type AT+EXITCONFIG to exit config mode");
+  
+  wm.resetSettings();
+  wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+  wm.setConfigPortalTimeout(300);
+  
+  wm.setConfigPortalBlocking(false);
+  wm.startConfigPortal(wifimanager_ssid, wifimanager_password);
+  
+  inConfigMode = true;
+  configModeStartTime = millis();
+  
+  Serial.println("OK Config mode started (non-blocking)");
+}
+
+void handleConfigMode() {
+  if (!inConfigMode) return;
+  
+  wm.process();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nOK WiFi config successful!");
+    Serial.println("  SSID: " + WiFi.SSID());
+    Serial.println("  IP: " + WiFi.localIP().toString());
+    inConfigMode = false;
+    wm.stopConfigPortal();
+    
+    Serial.println("System will restart...");
+    delay(1000);
+    ESP.restart();
+  }
+  
+  if (millis() - configModeStartTime > configModeTimeout) {
+    Serial.println("\nX Config timeout, restarting...");
+    inConfigMode = false;
+    wm.stopConfigPortal();
+    ESP.restart();
+  }
+}
+
+void exitConfigMode() {
+  if (inConfigMode) {
+    Serial.println("Exiting config mode...");
+    inConfigMode = false;
+    wm.stopConfigPortal();
+    Serial.println("OK Exited config mode");
+  } else {
+    Serial.println("Not in config mode");
+  }
+}
+
+void configModeCallback(WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+  setLED(CRGB(255, 255, 0));
+}
+
+// ==================== Client Mode ====================
+void initClientMode() {
+  Serial.println("Initializing client mode...");
+  
+  pinMode(CONFIG_MODE_PIN, INPUT_PULLUP);
+  if (digitalRead(CONFIG_MODE_PIN) == LOW) {
+    Serial.println("Config mode triggered, entering WiFi config...");
+    startConfigMode();
+    return;
+  }
+  
+  WiFi.begin(client_wifi_ssid, client_wifi_password);
+  
+  unsigned long startTime = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    if (debugMode) {
+      Serial.print(".");
+    }
+    
+    if (millis() - startTime > 15000) {
+      Serial.println("\nWiFi connection timeout, starting config mode...");
+      startConfigMode();
+      return;
+    }
+  }
+  
+  wifiConnected = true;
+  Serial.println("\nWiFi connected");
+  Serial.println("  Client IP: " + WiFi.localIP().toString());
+  
+  connectToServer();
+}
+
+void connectToServer() {
+  Serial.print("Connecting to server (" + String(server_ip) + ":" + String(server_port) + ")...");
+  
+  if (tcpClient.connect(server_ip, server_port)) {
+    tcpConnected = true;
+    Serial.println(" Success");
+    
+    String clientInfo = "CLIENT_ID:" + client_id + "|TIMESTAMP:" + String(millis());
+    tcpClient.println(clientInfo);
+    
+    if (debugMode) {
+      Serial.println("  Client ID: " + client_id);
+    }
+  } else {
+    tcpConnected = false;
+    Serial.println(" Failed");
+  }
+}
+
+void runClientMode() {
+  static unsigned long lastConnectAttempt = 0;
+  const unsigned long reconnectionInterval = 5000;
+  
+  if (!wifiConnected) {
+    Serial.println("WiFi disconnected, attempting reconnect...");
+    WiFi.begin(client_wifi_ssid, client_wifi_password);
+    
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      if (millis() - startTime > 10000) {
+        Serial.println("WiFi reconnect failed");
+        break;
+      }
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnected = true;
+      Serial.println("WiFi reconnected");
+    }
+  }
+  
+  if (!tcpConnected) {
+    if (millis() - lastConnectAttempt > reconnectionInterval) {
+      connectToServer();
+      lastConnectAttempt = millis();
+    }
+  }
+  
+  if (tcpConnected && tcpClient.available()) {
+    String data = tcpClient.readStringUntil('\n');
+    data.trim();
+    
+    if (data.length() > 0) {
+      Serial2.println(data);
+      
+      if (logToSD) {
+        saveDataToSD("[Server] " + data, client_id, false);
+      }
+      
+      if (debugMode) {
+        Serial.println("[Server] " + data);
+      }
+    }
+  }
+  
+  if (tcpConnected && !tcpClient.connected()) {
+    Serial.println("TCP disconnected");
+    tcpClient.stop();
+    tcpConnected = false;
+  }
+  
+  if (tcpConnected && Serial2.available()) {
+    String data = Serial2.readStringUntil('\n');
+    data.trim();
+    
+    if (data.length() > 0) {
+      String formattedData = "CLIENT_ID:" + client_id + "|TIMESTAMP:" + String(millis()) + "|DATA:" + data;
+      tcpClient.println(formattedData);
+      
+      if (logToSD) {
+        saveDataToSD("[UART2] " + data, client_id, false);
+      }
+      
+      if (debugMode) {
+        Serial.println("[UART2] " + data);
+      }
+    }
+  }
+}
+
+// ==================== Server Mode ====================
+void initServerMode() {
+  Serial.println("Initializing server mode...");
+  
+  WiFi.mode(WIFI_AP);
+  IPAddress localIP(192, 168, 1, 1);
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(localIP, gateway, subnet);
+  
+  if (WiFi.softAP(ap_ssid, ap_password)) {
+    wifiConnected = true;
+    Serial.println("WiFi AP started");
+    Serial.println("  AP SSID: " + String(ap_ssid));
+    Serial.println("  AP IP: " + WiFi.softAPIP().toString());
+  } else {
+    wifiConnected = false;
+    Serial.println("WiFi AP failed to start");
+  }
+  
+  tcpServer.begin();
+  Serial.println("TCP server started");
+  Serial.println("  Listen port: " + String(server_listen_port));
+  
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i]) {
+      serverClients[i].stop();
+    }
+  }
+}
+
+void runServerMode() {
+  WiFiClient newClient = tcpServer.available();
+  if (newClient) {
+    int freeSlot = -1;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if (!serverClients[i] || !serverClients[i].connected()) {
+        freeSlot = i;
+        break;
+      }
+    }
+    
+    if (freeSlot >= 0) {
+      serverClients[freeSlot] = newClient;
+      Serial.println("[Client " + String(freeSlot) + "] Connected: " + newClient.remoteIP().toString());
+      
+      clientSerialData[freeSlot] = "// Serial data log\n";
+      
+      serverClients[freeSlot].println("Welcome to ESP32 UART Server");
+    } else {
+      Serial.println("Client limit reached");
+      newClient.println("Server client limit reached");
+      newClient.stop();
+    }
+  }
+  
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      if (serverClients[i].available()) {
+        String data = serverClients[i].readStringUntil('\n');
+        data.trim();
+        
+        if (data.length() > 0) {
+          String clientId = parseClientId(data);
+          
+          int dataIndex = data.indexOf("|DATA:");
+          String actualData = (dataIndex >= 0) ? data.substring(dataIndex + 6) : data;
+          
+          Serial2.println(actualData);
+          
+          clientSerialData[i] += "[Client] " + actualData + "\n";
+          if (clientSerialData[i].length() > 2000) {
+            int lines = 0;
+            int pos = 0;
+            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
+              lines++;
+              pos++;
+            }
+            if (pos != -1) {
+              clientSerialData[i] = clientSerialData[i].substring(pos);
+            }
+          }
+          
+          if (logToSD) {
+            saveDataToSD("[Client " + String(i) + "] " + data, clientId, true);
+          }
+          
+          if (debugMode) {
+            Serial.println("[Client " + String(i) + "] " + data);
+          }
+        }
+      }
+      
+      if (Serial2.available()) {
+        String data = Serial2.readStringUntil('\n');
+        data.trim();
+        
+        if (data.length() > 0) {
+          serverClients[i].println(data);
+          
+          clientSerialData[i] += "[UART2] " + data + "\n";
+          if (clientSerialData[i].length() > 2000) {
+            int lines = 0;
+            int pos = 0;
+            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
+              lines++;
+              pos++;
+            }
+            if (pos != -1) {
+              clientSerialData[i] = clientSerialData[i].substring(pos);
+            }
+          }
+          
+          if (logToSD) {
+            String clientId = "SERVER";
+            saveDataToSD("[UART2] " + data, clientId, true);
+          }
+          
+          if (debugMode) {
+            Serial.println("[UART2] " + data);
+          }
+        }
+      }
+    } else if (serverClients[i]) {
+      Serial.println("[Client " + String(i) + "] Disconnected");
+      serverClients[i].stop();
+    }
+  }
+}
+
+String parseClientId(String data) {
+  int idStart = data.indexOf("CLIENT_ID:");
+  if (idStart >= 0) {
+    int idEnd = data.indexOf("|", idStart);
+    if (idEnd >= 0) {
+      return data.substring(idStart + 10, idEnd);
+    }
+  }
+  return "UNKNOWN";
+}
+
+int getConnectedClientCount() {
+  int count = 0;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      count++;
+    }
+  }
+  return count;
+}
