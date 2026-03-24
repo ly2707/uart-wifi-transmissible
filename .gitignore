@@ -1,0 +1,24 @@
+# IDE and editor files
+.vscode/
+
+# Build artifacts
+build/
+
+# Chat history
+.chat_history/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Log files
+*.log
+
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Compiled binary files
+*.bin
+*.elf
+*.hex
