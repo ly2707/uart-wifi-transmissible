@@ -11,12 +11,19 @@
 #include <driver/uart.h>
 
 // ==================== 版本信息 ====================
-#define FIRMWARE_VERSION "v2.2.4"  // 新增UART调试信息
+#define FIRMWARE_VERSION "v2.3.6"  // 优化网页样式，解决长文件名显示问题
 #define VERSION_MAJOR 2
-#define VERSION_MINOR 2
-#define VERSION_PATCH 4
+#define VERSION_MINOR 3
+#define VERSION_PATCH 6
 
-// 版本历史：`
+// 版本历史：
+// v2.3.6 - 2024-03-24 - 优化网页样式，解决长文件名显示问题，调整字体和布局
+// v2.3.5 - 2024-03-24 - 修复网页重复显示，添加串口数据实时同步
+// v2.3.4 - 2024-03-24 - 修复日志文件名乱码，添加文件名安全处理
+// v2.3.3 - 2024-03-24 - 修复编码问题导致的Guru Meditation Error
+// v2.3.2 - 2024-03-23 - 修复日志下载404，串口乱码，添加日志预览
+// v2.3.1 - 2024-03-23 - 修复UART2数据显示，正确处理换行
+// v2.3.0 - 2024-03-23 - 中断驱动高速透传，Web实时串口显示，AT+SELECT客户端选择
 // v2.2.4 - 2024-03-13 - 新增UART调试信息，修复接收问题
 // v2.2.3 - 2024-03-13 - 新增UART1↔UART2双向透传
 // v2.2.2 - 2024-03-13 - 修复UART收发异常、USB转发失效、调试串口显示
@@ -120,6 +127,14 @@ unsigned long lastLEDToggle = 0;
 int ledBlinkState = 0;
 int breatheValue = 0;
 
+// 配网模式相关
+bool inConfigMode = false;
+unsigned long configModeStartTime = 0;
+const unsigned long configModeTimeout = 300000; // 5分钟超时
+
+// 串口缓冲区
+String usbRxBuffer = "";
+
 // LED状态枚举
 enum LEDState {
   LED_OFF,
@@ -174,7 +189,6 @@ bool lowBattery = false;
 
 // ========== UART2/USB缓冲区 ==========
 String uart2RxBuffer = "";  // UART2接收缓冲区
-String usbRxBuffer = "";    // USB接收缓冲区
 #define UART_BUFFER_SIZE  1024  // 缓冲区大小限制
 
 // ==================== 函数声明 ====================

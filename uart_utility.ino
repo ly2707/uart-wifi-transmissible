@@ -1,7 +1,5 @@
 // ==================== UART Transparent Mode ====================
 
-// USB receive buffer
-String usbRxBuffer = "";
 #define UART_BUFFER_SIZE 1024
 
 void handleUART2ToDebug() {

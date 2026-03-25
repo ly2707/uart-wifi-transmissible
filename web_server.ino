@@ -21,8 +21,12 @@ void handleWebServer() {
     // 路由处理
     if (request.indexOf("GET / ") >= 0) {
       handleRootPage(client);
+    } else if (request.indexOf("GET /serial") >= 0) {
+      handleSerialData(client);
     } else if (request.indexOf("GET /logs") >= 0) {
       handleLogsPage(client, request);
+    } else if (request.indexOf("GET /preview") >= 0) {
+      handlePreviewLog(client, request);
     } else if (request.indexOf("GET /status ") >= 0) {
       handleStatusPage(client);
     } else if (request.indexOf("GET /client") >= 0) {
@@ -51,19 +55,31 @@ void handleRootPage(WiFiClient client) {
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
   html += "<title>ESP32 UART 服务器</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-  html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
-  html += "h2{font-size:20px;}";
-  html += "h3{font-size:18px;}";
-  html += ".menu{margin:20px 0;}";
-  html += ".menu a{display:block;padding:15px 20px;margin:10px 0;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;text-align:center;font-size:18px;}";
-  html += ".menu a:hover{background:#45a049;}";
-  html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:15px;margin:15px 0;font-size:16px;}";
-  html += "strong{font-size:16px;}";
+  html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
+  html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
+  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
+  html += "h2{font-size:16px;}";
+  html += "h3{font-size:15px;}";
+  html += ".menu{margin:15px 0;display:flex;flex-wrap:wrap;gap:8px;}";
+  html += ".menu a{display:block;padding:10px 12px;margin:0;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;text-align:center;font-size:13px;flex:1 1 100px;transition:all 0.2s ease;}";
+  html += ".menu a:hover{background:#45a049;transform:translateY(-1px);box-shadow:0 2px 5px rgba(0,0,0,0.2);}";
+  html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:10px;margin:12px 0;font-size:13px;}";
+  html += "strong{font-size:14px;}";
+  html += ".power-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}";
+  html += ".power-controls form{flex:1 1 80px;}";
+  html += ".power-controls input[type='submit']{width:100%;padding:6px 10px;border:none;border-radius:4px;background:#2196F3;color:white;font-size:12px;cursor:pointer;transition:all 0.2s ease;}";
+  html += ".power-controls input[type='submit']:hover{background:#1976D2;transform:translateY(-1px);}";
   html += "@media screen and (min-width: 600px) {";
-  html += ".container{max-width:800px;padding:20px;}";
-  html += ".menu a{display:inline-block;margin:5px;}";
+  html += ".container{max-width:800px;padding:15px;}";
+  html += ".menu a{flex:none;margin:5px;}";
+  html += ".power-controls form{flex:none;width:auto;}";
+  html += ".power-controls input[type='submit']{width:80px;}";
+  html += "}";
+  html += "@media screen and (max-width: 480px) {";
+  html += ".menu a{flex:1 1 100%;font-size:12px;padding:8px 10px;}";
+  html += ".container{max-width:95%;padding:10px;}";
+  html += "h1{font-size:16px;}";
+  html += "h3{font-size:14px;}";
   html += "}";
   html += "</style></head><body>";
   html += "<div class='container'>";
@@ -83,23 +99,25 @@ void handleRootPage(WiFiClient client) {
   
   // 电源控制
   html += "<div class='info'>";
-  html += "<h3>🔋 电源控制</h3>";
+  html += "<h3>电源控制</h3>";
+  html += "<div class='power-controls'>";
   html += "<form action='/power' method='post'>";
   html += "<input type='hidden' name='action' value='on'>";
-  html += "<input type='submit' value='开机' style='width:30%;margin:5px;'>";
+  html += "<input type='submit' value='开机'>";
   html += "</form>";
   html += "<form action='/power' method='post'>";
   html += "<input type='hidden' name='action' value='off'>";
-  html += "<input type='submit' value='关机' style='width:30%;margin:5px;'>";
+  html += "<input type='submit' value='关机'>";
   html += "</form>";
   html += "<form action='/power' method='post'>";
   html += "<input type='hidden' name='action' value='trigger'>";
-  html += "<input type='submit' value='触发关机' style='width:30%;margin:5px;'>";
+  html += "<input type='submit' value='触发关机'>";
   html += "</form>";
   html += "<form action='/power' method='post'>";
   html += "<input type='hidden' name='action' value='reset'>";
-  html += "<input type='submit' value='复位' style='width:30%;margin:5px;'>";
+  html += "<input type='submit' value='复位'>";
   html += "</form>";
+  html += "</div>";
   html += "</div>";
   html += "</div>";
   html += "</body></html>";
@@ -111,20 +129,35 @@ void handleLogsPage(WiFiClient client, String request) {
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
   html += "<title>ESP32 UART 日志</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-  html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
-  html += "h2{font-size:20px;}";
-  html += ".file-list{margin:20px 0;}";
-  html += ".file-item{padding:10px;border-bottom:1px solid #eee;}";
-  html += ".file-item a{text-decoration:none;color:#333;}";
-  html += ".file-item a:hover{color:#4CAF50;}";
-  html += ".size{float:right;color:#666;}";
-  html += ".back{margin-top:20px;}";
-  html += ".back a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += ".back a:hover{background:#45a049;}";
+  html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
+  html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
+  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
+  html += "h2{font-size:16px;}";
+  html += ".file-list{margin:15px 0;}";
+  html += ".file-item{padding:10px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;}";
+  html += ".file-name{flex:1;min-width:150px;word-break:break-all;}";
+  html += ".file-name a{text-decoration:none;color:#333;font-size:13px;}";
+  html += ".file-name a:hover{color:#4CAF50;}";
+  html += ".file-actions{display:flex;gap:8px;flex-shrink:0;margin-left:10px;}";
+  html += ".file-actions a{padding:6px 12px;background:#2196F3;color:white;text-decoration:none;border-radius:4px;font-size:12px;transition:all 0.2s ease;}";
+  html += ".file-actions a:hover{background:#1976D2;transform:translateY(-1px);}";
+  html += ".file-size{color:#666;font-size:12px;margin-left:10px;flex-shrink:0;}";
+  html += ".back{margin-top:15px;}";
+  html += ".back a{display:inline-block;padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
+  html += ".back a:hover{background:#45a049;transform:translateY(-1px);}";
+  html += ".breadcrumb{margin:10px 0;padding:8px;background:#f8f8f8;border-radius:4px;font-size:13px;}";
+  html += ".breadcrumb a{text-decoration:none;color:#2196F3;}";
+  html += ".breadcrumb a:hover{text-decoration:underline;}";
   html += "@media screen and (min-width: 600px) {";
-  html += ".container{max-width:800px;padding:20px;}";
+  html += ".container{max-width:800px;padding:15px;}";
+  html += "}";
+  html += "@media screen and (max-width: 480px) {";
+  html += ".file-item{flex-direction:column;align-items:flex-start;}";
+  html += ".file-actions{margin-left:0;margin-top:8px;}";
+  html += ".file-size{margin-left:0;margin-top:4px;}";
+  html += ".container{max-width:95%;padding:10px;}";
+  html += "h1{font-size:16px;}";
+  html += "h2{font-size:14px;}";
   html += "}";
   html += "</style></head><body>";
   html += "<div class='container'>";
@@ -136,24 +169,96 @@ void handleLogsPage(WiFiClient client, String request) {
     html += "<strong>错误:</strong> SD卡未就绪，无法查看日志文件";
     html += "</div>";
   } else {
-    // 列出服务器日志目录
-    html += "<h2>服务器日志</h2>";
+    // 解析目录参数
+    String currentDir = "/server";
+    int dirIndex = request.indexOf("dir=");
+    if (dirIndex > 0) {
+      int dirEnd = request.indexOf(" ", dirIndex);
+      if (dirEnd < 0) dirEnd = request.length();
+      String dirParam = request.substring(dirIndex + 4, dirEnd);
+      // 安全检查：防止路径遍历攻击
+      if (dirParam.indexOf("..") == -1) {
+        currentDir = "/server/" + dirParam;
+      }
+    }
+    
+    // 面包屑导航
+    html += "<div class='breadcrumb'>";
+    html += "<a href='/logs'>服务器日志</a>";
+    if (currentDir != "/server") {
+      String relativePath = currentDir.substring(8); // 去掉 "/server" 前缀
+      int slashPos = 0;
+      while ((slashPos = relativePath.indexOf('/')) != -1) {
+        String subDir = relativePath.substring(0, slashPos);
+        html += " → <a href='/logs?dir=" + subDir + "'>" + subDir + "</a>";
+        relativePath = relativePath.substring(slashPos + 1);
+      }
+      if (relativePath.length() > 0) {
+        html += " → " + relativePath;
+      }
+    }
+    html += "</div>";
+    
+    // 列出当前目录内容
+    html += "<h2>" + currentDir + "</h2>";
     html += "<div class='file-list'>";
-    File root = SD.open("/server");
+    File root = SD.open(currentDir);
     if (root) {
+      bool hasFiles = false;
+      
+      // 显示返回上级目录链接
+      if (currentDir != "/server") {
+        String parentDir = currentDir.substring(0, currentDir.lastIndexOf('/'));
+        if (parentDir == "/server") {
+          html += "<div class='file-item'>";
+          html += "<div class='file-name'>";
+          html += "<a href='/logs'>📁 .. (返回上级)</a>";
+          html += "</div>";
+          html += "</div>";
+        } else {
+          String parentPath = parentDir.substring(8); // 去掉 "/server" 前缀
+          html += "<div class='file-item'>";
+          html += "<div class='file-name'>";
+          html += "<a href='/logs?dir=" + parentPath + "'>📁 .. (返回上级)</a>";
+          html += "</div>";
+          html += "</div>";
+        }
+      }
+      
       while (true) {
         File entry = root.openNextFile();
         if (!entry) break;
+        hasFiles = true;
+        String entryName = entry.name();
+        String entryPath = currentDir + "/" + entryName;
+        String entryUrlPath = entryPath.substring(8); // 去掉 "/server" 前缀
+        
         if (entry.isDirectory()) {
-          String dirName = entry.name();
-          html += "<div class='file-item'><a href='/logs?dir=" + dirName + "'>? " + dirName + "</a></div>";
+          html += "<div class='file-item'>";
+          html += "<div class='file-name'>";
+          html += "<a href='/logs?dir=" + entryUrlPath + "'>📁 " + entryName + "</a>";
+          html += "</div>";
+          html += "</div>";
+        } else {
+          String fileSize = formatFileSize(entry.size());
+          html += "<div class='file-item'>";
+          html += "<div class='file-name'>📄 " + entryName + "</div>";
+          html += "<div class='file-actions'>";
+          html += "<a href='/preview?file=" + entryPath + "'>预览</a>";
+          html += "<a href='/download?file=" + entryPath + "'>下载</a>";
+          html += "</div>";
+          html += "<div class='file-size'>" + fileSize + "</div>";
+          html += "</div>";
         }
         entry.close();
+      }
+      if (!hasFiles) {
+        html += "<div class='file-item'><div class='file-name'>空目录</div></div>";
       }
       root.close();
     } else {
       html += "<div style='background:#ffebee;border-left:4px solid #f44336;padding:15px;margin:15px 0;'>";
-      html += "<strong>错误:</strong> 无法打开服务器日志目录";
+      html += "<strong>错误:</strong> 无法打开目录: " + currentDir;
       html += "</div>";
     }
     html += "</div>";
@@ -170,17 +275,22 @@ void handleStatusPage(WiFiClient client) {
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
   html += "<title>ESP32 UART 系统状态</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-  html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
-  html += "h2{font-size:20px;}";
-  html += ".status{background:#e7f3fe;border-left:4px solid #2196F3;padding:15px;margin:15px 0;font-size:16px;}";
-  html += "strong{font-size:16px;}";
-  html += ".back{margin-top:20px;}";
-  html += ".back a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += ".back a:hover{background:#45a049;}";
+  html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
+  html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
+  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
+  html += "h2{font-size:16px;}";
+  html += ".status{background:#e7f3fe;border-left:4px solid #2196F3;padding:10px;margin:12px 0;font-size:13px;}";
+  html += "strong{font-size:14px;}";
+  html += ".back{margin-top:15px;}";
+  html += ".back a{display:inline-block;padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
+  html += ".back a:hover{background:#45a049;transform:translateY(-1px);}";
   html += "@media screen and (min-width: 600px) {";
-  html += ".container{max-width:800px;padding:20px;}";
+  html += ".container{max-width:800px;padding:15px;}";
+  html += "}";
+  html += "@media screen and (max-width: 480px) {";
+  html += ".container{max-width:95%;padding:10px;}";
+  html += "h1{font-size:16px;}";
+  html += "h2{font-size:14px;}";
   html += "}";
   html += "</style></head><body>";
   html += "<div class='container'>";
@@ -466,16 +576,33 @@ void handleDownloadLog(WiFiClient client, String request) {
   // 解析文件路径
   int fileStart = request.indexOf("file=") + 5;
   int fileEnd = request.indexOf("&", fileStart);
+  int spaceEnd = request.indexOf(" ", fileStart);
+  if (fileEnd == -1 || (spaceEnd != -1 && spaceEnd < fileEnd)) {
+    fileEnd = spaceEnd;
+  }
   if (fileEnd == -1) fileEnd = request.length();
   String filePath = request.substring(fileStart, fileEnd);
+  
+  // URL解码
+  filePath = urlDecode(filePath);
+  
+  // 安全检查：防止路径遍历攻击
+  if (filePath.indexOf("..") != -1) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><p>非法的文件路径</p><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
   
   // 打开文件
   File file = SD.open(filePath);
   if (file) {
+    String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
     // 发送文件
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: application/octet-stream");
-    client.println("Content-Disposition: attachment; filename=\"" + String(filePath.substring(filePath.lastIndexOf('/') + 1)) + "\"");
+    client.println("Content-Disposition: attachment; filename=\"" + fileName + "\"");
     client.println("Content-Length: " + String(file.size()));
     client.println();
     
@@ -489,7 +616,7 @@ void handleDownloadLog(WiFiClient client, String request) {
     client.println("HTTP/1.1 404 Not Found");
     client.println("Content-Type: text/html");
     client.println();
-    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 文件未找到</h1><p>请求的文件不存在</p></body></html>");
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 文件未找到</h1><p>请求的文件不存在: " + filePath + "</p><a href='/logs'>返回日志列表</a></body></html>");
   }
 }
 
@@ -585,4 +712,157 @@ void handleNotFound(WiFiClient client) {
   client.println("Content-Type: text/html");
   client.println();
   client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 页面未找到</h1><p>请求的页面不存在</p><a href='/'>返回首页</a></body></html>");
+}
+
+// 格式化文件大小
+String formatFileSize(unsigned long bytes) {
+  if (bytes < 1024) {
+    return String(bytes) + " B";
+  } else if (bytes < 1024 * 1024) {
+    return String(bytes / 1024.0, 1) + " KB";
+  } else {
+    return String(bytes / (1024.0 * 1024.0), 1) + " MB";
+  }
+}
+
+// URL解码函数
+String urlDecode(String input) {
+  String result = "";
+  for (unsigned int i = 0; i < input.length(); i++) {
+    if (input.charAt(i) == '%') {
+      if (i + 2 < input.length()) {
+        char hex1 = input.charAt(i + 1);
+        char hex2 = input.charAt(i + 2);
+        int value = 0;
+        if (hex1 >= '0' && hex1 <= '9') value += (hex1 - '0') * 16;
+        else if (hex1 >= 'a' && hex1 <= 'f') value += (hex1 - 'a' + 10) * 16;
+        else if (hex1 >= 'A' && hex1 <= 'F') value += (hex1 - 'A' + 10) * 16;
+        
+        if (hex2 >= '0' && hex2 <= '9') value += (hex2 - '0');
+        else if (hex2 >= 'a' && hex2 <= 'f') value += (hex2 - 'a' + 10);
+        else if (hex2 >= 'A' && hex2 <= 'F') value += (hex2 - 'A' + 10);
+        
+        result += (char)value;
+        i += 2;
+      } else {
+        result += input.charAt(i);
+      }
+    } else if (input.charAt(i) == '+') {
+      result += ' ';
+    } else {
+      result += input.charAt(i);
+    }
+  }
+  return result;
+}
+
+// 处理日志预览
+void handlePreviewLog(WiFiClient client, String request) {
+  int fileStart = request.indexOf("file=") + 5;
+  int fileEnd = request.indexOf("&", fileStart);
+  int spaceEnd = request.indexOf(" ", fileStart);
+  if (fileEnd == -1 || (spaceEnd != -1 && spaceEnd < fileEnd)) {
+    fileEnd = spaceEnd;
+  }
+  if (fileEnd == -1) fileEnd = request.length();
+  String filePath = request.substring(fileStart, fileEnd);
+  
+  // URL解码
+  filePath = urlDecode(filePath);
+  
+  // 安全检查：防止路径遍历攻击
+  if (filePath.indexOf("..") != -1) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><p>非法的文件路径</p><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  File file = SD.open(filePath);
+  if (file) {
+    String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+    String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
+    html += "<title>预览: " + fileName + "</title>";
+    html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
+    html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
+    html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;word-break:break-all;}";
+    html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:10px;margin:10px 0;font-size:13px;}";
+    html += ".preview-box{background:#1e1e1e;border:1px solid #333;border-radius:5px;padding:12px;margin:12px 0;height:400px;overflow-y:scroll;font-family:monospace;font-size:12px;color:#0f0;white-space:pre-wrap;word-wrap:break-word;}";
+    html += ".preview-box::-webkit-scrollbar{width:8px;}";
+    html += ".preview-box::-webkit-scrollbar-track{background:#2d2d2d;}";
+    html += ".preview-box::-webkit-scrollbar-thumb{background:#555;border-radius:4px;}";
+    html += ".preview-box::-webkit-scrollbar-thumb:hover{background:#777;}";
+    html += ".actions{margin:15px 0;display:flex;gap:8px;}";
+    html += ".actions a{padding:8px 16px;background:#2196F3;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
+    html += ".actions a:hover{background:#1976D2;transform:translateY(-1px);}";
+    html += ".back{margin-top:10px;}";
+    html += ".back a{padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
+    html += ".back a:hover{background:#45a049;transform:translateY(-1px);}";
+    html += "@media screen and (min-width: 600px) {";
+    html += ".container{max-width:900px;padding:15px;}";
+    html += ".preview-box{height:500px;}";
+    html += "}";
+    html += "@media screen and (max-width: 480px) {";
+    html += ".container{max-width:95%;padding:10px;}";
+    html += "h1{font-size:16px;}";
+    html += "}";
+    html += "</style></head><body>";
+    html += "<div class='container'>";
+    html += "<h1>📄 " + fileName + "</h1>";
+    
+    html += "<div class='info'>";
+    html += "<strong>路径:</strong> " + filePath + "<br>";
+    html += "<strong>大小:</strong> " + formatFileSize(file.size());
+    html += "</div>";
+    
+    html += "<div class='actions'>";
+    html += "<a href='/download?file=" + filePath + "'>下载文件</a>";
+    html += "<a href='/logs'>返回列表</a>";
+    html += "</div>";
+    
+    html += "<div class='preview-box'>";
+    const int maxPreviewSize = 16384; // 16KB
+    int bytesRead = 0;
+    while (file.available() && bytesRead < maxPreviewSize) {
+      char c = file.read();
+      bytesRead++;
+      if (c == '<') html += "&lt;";
+      else if (c == '>') html += "&gt;";
+      else if (c == '&') html += "&amp;";
+      else if (c == '"') html += "&quot;";
+      else if (c == '\'') html += "&#39;";
+      else if (c == '\r') {} // 忽略回车符
+      else html += c;
+    }
+    
+    if (file.available()) {
+      html += "\n\n... [文件过大，仅显示前" + String(bytesRead) + "字节]";
+    }
+    
+    html += "</div>";
+    
+    html += "<div class='back'><a href='/logs'>返回日志列表</a></div>";
+    html += "</div>";
+    html += "</body></html>";
+    client.print(html);
+    file.close();
+  } else {
+    client.println("HTTP/1.1 404 Not Found");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>404 - 文件未找到</h1><p>请求的文件不存在: " + filePath + "</p><a href='/logs'>返回日志列表</a></body></html>");
+  }
+}
+
+// 处理串口数据请求
+void handleSerialData(WiFiClient client) {
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/plain");
+  client.println();
+  
+  // 这里可以返回实时串口数据
+  client.print("等待数据...");
 }
