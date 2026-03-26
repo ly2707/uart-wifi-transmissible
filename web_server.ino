@@ -237,8 +237,13 @@ void handleLogsPage(WiFiClient client, String request) {
           currentDir = "/client";
         } else if (dirParam == "server") {
           currentDir = "/server/SERVER";
+        } else if (dirParam.startsWith("client/")) {
+          currentDir = "/" + dirParam;
+        } else if (dirParam.startsWith("server/")) {
+          currentDir = "/" + dirParam;
         } else if (dirParam.length() > 0) {
-          currentDir = "/server/" + dirParam;
+          // 其他情况，假设是客户端子目录
+          currentDir = "/client/" + dirParam;
         }
       }
     }
@@ -300,7 +305,12 @@ void handleLogsPage(WiFiClient client, String request) {
         hasFiles = true;
         String entryName = entry.name();
         String entryPath = currentDir + "/" + entryName;
-        String entryUrlPath = entryPath.substring(8); // 去掉 "/server" 前缀
+        String entryUrlPath;
+        if (currentDir.startsWith("/server")) {
+          entryUrlPath = entryPath.substring(8); // 去掉 "/server" 前缀
+        } else {
+          entryUrlPath = entryPath.substring(7); // 去掉 "/client" 前缀
+        }
         
         if (entry.isDirectory()) {
           html += "<div class='file-item'>";
