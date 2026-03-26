@@ -227,6 +227,8 @@ void runServerMode() {
     }
   }
   
+  static String clientLineBuffer[MAX_CLIENTS];
+  
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected()) {
       size_t available = serverClients[i].available();
@@ -241,17 +243,30 @@ void runServerMode() {
           char c = buf[j];
           if (c == '\n') {
             clientSerialData[i] += "\n";
+            clientLineBuffer[i] += "\n";
+            
+            if (clientLineBuffer[i].length() > 1) {
+              if (logToSD) {
+                saveDataToSD("[客户端" + String(i) + "] " + clientLineBuffer[i], "SERVER", true);
+              }
+            }
+            clientLineBuffer[i] = "";
           } else if (c != '\r') {
             clientSerialData[i] += String(c);
+            clientLineBuffer[i] += String(c);
           }
         }
         
         if (clientSerialData[i].length() > 2000) {
           clientSerialData[i] = clientSerialData[i].substring(clientSerialData[i].length() - 1500);
         }
+        if (clientLineBuffer[i].length() > 500) {
+          clientLineBuffer[i] = "";
+        }
       }
     } else if (serverClients[i]) {
       serverClients[i].stop();
+      clientLineBuffer[i] = "";
     }
   }
 }

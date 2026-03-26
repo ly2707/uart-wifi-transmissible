@@ -212,7 +212,7 @@ void handleLogsPage(WiFiClient client, String request) {
   html += "<div class='container'>";
   html += "<h1>📋 日志文件</h1>";
   html += "<div style='margin:10px 0;'>";
-  html += "<a href='/logs?dir=' style='padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;'>服务器日志</a> ";
+  html += "<a href='/logs?dir=server' style='padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;'>服务器日志</a> ";
   html += "<a href='/logs?dir=client' style='padding:8px 16px;background:#2196F3;color:white;text-decoration:none;border-radius:4px;'>客户端日志</a>";
   html += "</div>";
   
@@ -223,7 +223,7 @@ void handleLogsPage(WiFiClient client, String request) {
     html += "</div>";
   } else {
     // 解析目录参数
-    String currentDir = "/server";
+    String currentDir = "/server/SERVER";
     int dirIndex = request.indexOf("dir=");
     if (dirIndex > 0) {
       int dirEnd = request.indexOf(" ", dirIndex);
@@ -231,26 +231,30 @@ void handleLogsPage(WiFiClient client, String request) {
       String dirParam = request.substring(dirIndex + 4, dirEnd);
       // 安全检查：防止路径遍历攻击
       if (dirParam.indexOf("..") == -1) {
-        currentDir = "/server/" + dirParam;
+        if (dirParam == "client") {
+          currentDir = "/client";
+        } else if (dirParam.length() > 0) {
+          currentDir = "/server/" + dirParam;
+        }
       }
     }
     
     // 面包屑导航
     html += "<div class='breadcrumb'>";
-    html += "<a href='/logs'>服务器日志</a>";
-    if (currentDir != "/server") {
-      String relativePath = currentDir.substring(8); // 去掉 "/server" 前缀
-      int slashPos = 0;
-      while ((slashPos = relativePath.indexOf('/')) != -1) {
-        String subDir = relativePath.substring(0, slashPos);
-        if (subDir.length() > 20) subDir = subDir.substring(0, 17) + "...";
-        html += " → <a href='/logs?dir=" + subDir + "'>" + subDir + "</a>";
-        relativePath = relativePath.substring(slashPos + 1);
+    html += "<a href='/logs'>根目录</a>";
+    if (currentDir.startsWith("/server")) {
+      html += " → <a href='/logs?dir=server'>服务器</a>";
+      if (currentDir != "/server" && currentDir != "/server/SERVER") {
+        String subPath = currentDir.substring(8); // 去掉 "/server" 前缀
+        if (subPath != "SERVER") {
+          html += " → " + subPath;
+        }
       }
-      if (relativePath.length() > 0) {
-        String displayLast = relativePath;
-        if (displayLast.length() > 25) displayLast = displayLast.substring(0, 22) + "...";
-        html += " → " + displayLast;
+    } else if (currentDir.startsWith("/client")) {
+      html += " → <a href='/logs?dir=client'>客户端</a>";
+      String subPath = currentDir.substring(7); // 去掉 "/client" 前缀
+      if (subPath.length() > 0 && subPath != "/") {
+        html += " → " + subPath;
       }
     }
     html += "</div>";
@@ -267,22 +271,23 @@ void handleLogsPage(WiFiClient client, String request) {
       bool hasFiles = false;
       
       // 显示返回上级目录链接
-      if (currentDir != "/server") {
+      if (currentDir != "/server/SERVER" && currentDir != "/client") {
         String parentDir = currentDir.substring(0, currentDir.lastIndexOf('/'));
+        String parentLink = "";
         if (parentDir == "/server") {
-          html += "<div class='file-item'>";
-          html += "<div class='file-name'>";
-          html += "<a href='/logs'>📁 .. (返回上级)</a>";
-          html += "</div>";
-          html += "</div>";
+          parentLink = "/logs?dir=server";
+        } else if (parentDir == "/client") {
+          parentLink = "/logs?dir=client";
+        } else if (parentDir.startsWith("/server")) {
+          parentLink = "/logs?dir=" + parentDir.substring(8);
         } else {
-          String parentPath = parentDir.substring(8); // 去掉 "/server" 前缀
-          html += "<div class='file-item'>";
-          html += "<div class='file-name'>";
-          html += "<a href='/logs?dir=" + parentPath + "'>📁 .. (返回上级)</a>";
-          html += "</div>";
-          html += "</div>";
+          parentLink = "/logs?dir=" + parentDir.substring(1);
         }
+        html += "<div class='file-item'>";
+        html += "<div class='file-name'>";
+        html += "<a href='" + parentLink + "'>📁 .. (返回上级)</a>";
+        html += "</div>";
+        html += "</div>";
       }
       
       while (true) {
