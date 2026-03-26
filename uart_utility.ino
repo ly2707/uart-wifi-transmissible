@@ -3,29 +3,23 @@
 #define UART_BUFFER_SIZE 1024
 
 void handleUART2ToDebug() {
-  // Handle UART2 receive, send to debug serial (replaced by interrupt mode)
-  // This function is kept as backup
+  // Handle UART2 receive from ring buffer, send to debug serial
+  // This uses the interrupt-driven ring buffer from uart_interrupt.ino
+  handleHighSpeedUART();
 }
 
 void handleUSBSerial() {
-  // Handle USB CDC serial input
-  if (Serial.available()) {
+  while (Serial.available()) {
     char incoming = Serial.read();
     
     if (incoming == '\n' || incoming == '\r') {
-      // Line end, process complete command
       if (usbRxBuffer.length() > 0) {
         String command = usbRxBuffer;
         usbRxBuffer = "";
-        
-        // Process command
         handleCommand(command);
       }
-    } else {
-      // Accumulate characters to buffer
+    } else if (incoming >= 32 || incoming == '\t' || incoming == 27) {
       usbRxBuffer += incoming;
-      
-      // Limit buffer size
       if (usbRxBuffer.length() > UART_BUFFER_SIZE) {
         usbRxBuffer = "";
         Serial.println("X Input buffer overflow");
@@ -72,6 +66,7 @@ void handleCommand(String command) {
     if (newBaud >= 9600 && newBaud <= 921600) {
       uart2BaudRate = newBaud;
       Serial2.begin(uart2BaudRate, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);
+      initUARTInterrupt();
       saveConfigToEEPROM();
       Serial.println("OK UART2 baud rate set to: " + String(uart2BaudRate));
     } else {
@@ -89,26 +84,15 @@ void handleCommand(String command) {
     Serial.println("System will restart...");
     ESP.restart();
   } else if (command == "AT+RAW") {
-    // Enter RAW mode (transparent, no command parsing)
-    Serial.println("Enter RAW mode (type 'AT+EXIT' to exit)");
-    while (true) {
-      // Read from USB and send to UART2
-      if (Serial.available()) {
-        String data = Serial.readStringUntil('\n');
-        if (data == "AT+EXIT") {
-          Serial.println("Exit RAW mode");
-          break;
-        }
-        Serial2.println(data);
-      }
-      
-      // Read from UART2 and send to USB
-      if (Serial2.available()) {
-        String data = Serial2.readStringUntil('\n');
-        Serial.println("[UART2] " + data);
-      }
-      
-      delay(10);
+    rawTransmitMode = true;
+    Serial.println("OK RAW mode enabled - data sent directly to UART2");
+    Serial.println("Type +++ or ESC to exit");
+  } else if (command == "AT+EXIT" || command == "+++") {
+    if (rawTransmitMode) {
+      rawTransmitMode = false;
+      Serial.println("OK RAW mode disabled - back to command mode");
+    } else {
+      Serial.println("OK Not in RAW mode");
     }
   } else if (command == "AT+POWER=ON") {
     powerOn();

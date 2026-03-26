@@ -1,61 +1,58 @@
 // ==================== UART Interrupt Transparent Mode ====================
-// Use interrupt to improve serial transparent speed
 
-// Ring buffer size
-#define UART_RING_BUFFER_SIZE 2048
+#define UART_RING_BUFFER_SIZE 8192
 
-// UART2 ring buffer (interrupt driven)
 volatile uint8_t uart2RingBuffer[UART_RING_BUFFER_SIZE];
 volatile uint16_t uart2RingHead = 0;
 volatile uint16_t uart2RingTail = 0;
 volatile bool uart2RingOverflow = false;
 
-// Client transparent selection
-int selectedClientIndex = -1;  // -1: not selected, 0-4: client index
+#define TCP_SEND_BUFFER_SIZE 1024
+uint8_t tcpSendBuffer[TCP_SEND_BUFFER_SIZE];
+uint16_t tcpSendBufferLen = 0;
 
-// ISR - UART2 receive
+int selectedClientIndex = -1;
+
 void IRAM_ATTR uart2RxISR() {
   while (Serial2.available()) {
     uint16_t nextHead = (uart2RingHead + 1) % UART_RING_BUFFER_SIZE;
-    
     if (nextHead != uart2RingTail) {
       uart2RingBuffer[uart2RingHead] = Serial2.read();
       uart2RingHead = nextHead;
     } else {
-      // Buffer overflow
       uart2RingOverflow = true;
-      Serial2.read();  // Discard data
+      Serial2.read();
     }
   }
 }
 
-// Initialize UART interrupt
 void initUARTInterrupt() {
-  // Enable UART2 receive interrupt
   Serial2.onReceive(uart2RxISR);
-  
   if (debugMode) {
     Serial.println("UART interrupt mode enabled");
   }
 }
 
-// Read data from UART2 ring buffer
 int readUART2Buffer() {
   if (uart2RingHead == uart2RingTail) {
-    return -1;  // Buffer empty
+    return -1;
   }
-  
   uint8_t data = uart2RingBuffer[uart2RingTail];
   uart2RingTail = (uart2RingTail + 1) % UART_RING_BUFFER_SIZE;
   return data;
 }
 
-// Check if UART2 buffer has data
+int peekUART2Buffer() {
+  if (uart2RingHead == uart2RingTail) {
+    return -1;
+  }
+  return uart2RingBuffer[uart2RingTail];
+}
+
 bool uart2BufferAvailable() {
   return uart2RingHead != uart2RingTail;
 }
 
-// Get UART2 buffer data length
 int uart2BufferLength() {
   if (uart2RingHead >= uart2RingTail) {
     return uart2RingHead - uart2RingTail;
@@ -64,43 +61,103 @@ int uart2BufferLength() {
   }
 }
 
-// High speed UART transparent handling (interrupt driven)
-void handleHighSpeedUART() {
-  // Handle UART2 receive data - output directly like Xshell
-  if (uart2BufferAvailable()) {
-    // Output characters directly, don't wait for newline
-    while (uart2BufferAvailable()) {
-      int ch = readUART2Buffer();
-      if (ch >= 0) {
-        // Output to debug serial directly
-        Serial.write((uint8_t)ch);
-        
-        // Server mode: forward to selected client or all clients
-        if (currentMode == MODE_SERVER) {
-          if (selectedClientIndex >= 0 && selectedClientIndex < MAX_CLIENTS) {
-            // Forward to selected client
-            if (serverClients[selectedClientIndex] && serverClients[selectedClientIndex].connected()) {
-              serverClients[selectedClientIndex].write((uint8_t)ch);
-            }
-          } else {
-            // Forward to all clients
-            for (int i = 0; i < MAX_CLIENTS; i++) {
-              if (serverClients[i] && serverClients[i].connected()) {
-                serverClients[i].write((uint8_t)ch);
-              }
-            }
-          }
-        }
-        
-        // Client mode: forward to server
-        if (currentMode == MODE_CLIENT && tcpConnected) {
-          tcpClient.write((uint8_t)ch);
+void flushTCPBuffer() {
+  if (tcpSendBufferLen == 0) return;
+  
+  if (currentMode == MODE_SERVER) {
+    if (selectedClientIndex >= 0 && selectedClientIndex < MAX_CLIENTS) {
+      if (serverClients[selectedClientIndex] && serverClients[selectedClientIndex].connected()) {
+        serverClients[selectedClientIndex].write(tcpSendBuffer, tcpSendBufferLen);
+      }
+    } else {
+      for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (serverClients[i] && serverClients[i].connected()) {
+          serverClients[i].write(tcpSendBuffer, tcpSendBufferLen);
         }
       }
     }
+  } else if (currentMode == MODE_CLIENT && tcpConnected) {
+    tcpClient.write(tcpSendBuffer, tcpSendBufferLen);
   }
   
-  // Check overflow flag
+  tcpSendBufferLen = 0;
+}
+
+void handleHighSpeedUART() {
+  int ch;
+  static bool lastWasCR = false;
+  
+  while ((ch = readUART2Buffer()) >= 0) {
+    if (ch == '\r') {
+      lastWasCR = true;
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+    } else if (ch == '\n') {
+      Serial.print("\r\n");
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+      lastWasCR = false;
+    } else {
+      Serial.write((uint8_t)ch);
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+      lastWasCR = false;
+    }
+    
+    if (tcpSendBufferLen >= TCP_SEND_BUFFER_SIZE) {
+      flushTCPBuffer();
+    }
+  }
+  
+  flushTCPBuffer();
+  
+  if (uart2RingOverflow) {
+    Serial.println("\nUART2 buffer overflow");
+    uart2RingOverflow = false;
+  }
+}
+
+void handleHighSpeedUARTWithWebBuffer() {
+  static unsigned long lastCheck = 0;
+  
+  if (millis() - lastCheck > 3000) {
+    lastCheck = millis();
+  }
+  
+  int ch;
+  static bool lastWasCR = false;
+  
+  while ((ch = readUART2Buffer()) >= 0) {
+    // \r或\n都产生新行
+    if (ch == '\r') {
+      Serial.write('\r');
+      Serial.write('\n');
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+      appendToSerialBuffer("\r\n");
+      lastWasCR = true;
+    } else if (ch == '\n') {
+      if (!lastWasCR) {
+        Serial.write('\r');
+        Serial.write('\n');
+        tcpSendBuffer[tcpSendBufferLen++] = '\r';
+        appendToSerialBuffer("\r\n");
+      } else {
+        Serial.write('\n');
+      }
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+      appendToSerialBuffer("\n");
+      lastWasCR = false;
+    } else {
+      Serial.write((uint8_t)ch);
+      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
+      appendToSerialBuffer((char)ch);
+      lastWasCR = false;
+    }
+    
+    if (tcpSendBufferLen >= TCP_SEND_BUFFER_SIZE) {
+      flushTCPBuffer();
+    }
+  }
+  
+  flushTCPBuffer();
+  
   if (uart2RingOverflow) {
     Serial.println("\nUART2 buffer overflow");
     uart2RingOverflow = false;

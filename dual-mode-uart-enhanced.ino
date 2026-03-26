@@ -11,13 +11,14 @@
 #include <driver/uart.h>
 
 // ==================== 版本信息 ====================
-#define FIRMWARE_VERSION "v2.3.6"  // 优化网页样式，解决长文件名显示问题
+#define FIRMWARE_VERSION "v2.5.0"  // 优化串口透传速度，批量写入TCP缓冲区
 #define VERSION_MAJOR 2
-#define VERSION_MINOR 3
-#define VERSION_PATCH 6
+#define VERSION_MINOR 5
+#define VERSION_PATCH 0
 
 // 版本历史：
-// v2.3.6 - 2024-03-24 - 优化网页样式，解决长文件名显示问题，调整字体和布局
+// v2.5.0 - 2026-03-26 - 优化串口透传速度，批量写入TCP缓冲区，移除重复读取
+// v2.4.0 - 2026-03-26 - 修复UART中断未初始化问题，完善Web串口监视器实时显示，优化客户端页面
 // v2.3.5 - 2024-03-24 - 修复网页重复显示，添加串口数据实时同步
 // v2.3.4 - 2024-03-24 - 修复日志文件名乱码，添加文件名安全处理
 // v2.3.3 - 2024-03-24 - 修复编码问题导致的Guru Meditation Error
@@ -53,10 +54,10 @@
 #define LONG_PRESS    5000   // 长按阈值（毫秒）
 
 // 配网模式触发引脚
-#define CONFIG_MODE_PIN  2   // GPIO2 用于触发配网模式
+#define CONFIG_MODE_PIN  42   // GPIO2 用于触发配网模式
 
 // 电源和复位控制引脚
-#define POWER_CONTROL_PIN  3   // GPIO3 用于控制开机关机
+#define POWER_CONTROL_PIN  5   // GPIO3 用于控制开机关机
 #define RESET_CONTROL_PIN  4   // GPIO4 用于控制CPU复位
 
 // LED配置
@@ -135,6 +136,9 @@ const unsigned long configModeTimeout = 300000; // 5分钟超时
 // 串口缓冲区
 String usbRxBuffer = "";
 
+// RAW透传模式
+bool rawTransmitMode = false;
+
 // LED状态枚举
 enum LEDState {
   LED_OFF,
@@ -191,6 +195,11 @@ bool lowBattery = false;
 String uart2RxBuffer = "";  // UART2接收缓冲区
 #define UART_BUFFER_SIZE  1024  // 缓冲区大小限制
 
+// ========== 串口实时显示缓冲区 ==========
+#define SERIAL_DISPLAY_BUFFER_SIZE  4096
+String serialDisplayBuffer = "";  // Web串口显示缓冲区
+unsigned long lastSerialUpdate = 0;
+
 // ==================== 函数声明 ====================
 // 初始化函数
 void setup();
@@ -224,13 +233,24 @@ void initWebServer();
 void handleWebServer();
 void handleRootPage(WiFiClient client);
 void handleLogsPage(WiFiClient client, String request);
+void handlePreviewLog(WiFiClient client, String request);
 void handleStatusPage(WiFiClient client);
 void handleConfigPage(WiFiClient client);
 void handleDownloadLog(WiFiClient client, String request);
 void handleClearLog(WiFiClient client);
 void handleSaveConfig(WiFiClient client);
 void handleClientPage(WiFiClient client, String request);
+void handleClientSend(WiFiClient client, String request);
 void handleNotFound(WiFiClient client);
+void handleSerialPage(WiFiClient client);
+void handleSerialDataAPI(WiFiClient client);
+void handleSerialSend(WiFiClient client, String request);
+void handleSerialClear(WiFiClient client);
+void handlePowerControl(WiFiClient client, String request);
+void appendToSerialBuffer(char c);
+void appendToSerialBuffer(const char* str);
+String formatFileSize(unsigned long bytes);
+String urlDecode(String input);
 
 // 智能配网
 void startConfigMode();
@@ -249,6 +269,8 @@ int getConnectedClientCount();
 
 // UART透传
 void handleUART2ToDebug();
+void handleHighSpeedUART();
+void handleHighSpeedUARTWithWebBuffer();
 void handleUSBSerial();
 String formatClientData(String data);
 
@@ -266,7 +288,7 @@ void printHelp();
 void setup() {
   // 初始化调试串口（优先）
   Serial.begin(115200);
-  while (!Serial) delay(10);
+  delay(100);
   
   Serial.println("\n========================================");
   Serial.println("  ESP32-S3 UART2透传系统");
@@ -281,6 +303,9 @@ void setup() {
   // ========== 初始化UART2 ==========
   Serial2.begin(uart2BaudRate, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);
   
+  // 初始化UART中断（中断驱动高速透传）
+  initUARTInterrupt();
+  
   if (debugMode) {
     Serial.print("✓ UART2初始化完成，波特率: ");
     Serial.println(uart2BaudRate);
@@ -288,6 +313,7 @@ void setup() {
     Serial.print(UART2_RX_PIN);
     Serial.print(" TX=");
     Serial.println(UART2_TX_PIN);
+    Serial.println("✓ UART中断模式已启用");
     
     // 测试UART2发送
     Serial2.println("UART2 Test Message");
@@ -318,9 +344,11 @@ void setup() {
   
   // 初始化SD卡
   initSDCard();
+  yield();
   
   // 检测电池电压
   checkBattery();
+  yield();
   
   // 根据模式初始化网络
   if (currentMode == MODE_CLIENT) {
@@ -328,6 +356,7 @@ void setup() {
   } else {
     initServerMode();
   }
+  yield();
   
   // 使用芯片ID生成唯一客户端ID
   uint32_t chipId = 0;
@@ -335,7 +364,9 @@ void setup() {
     chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   client_id = "ESP32_CLIENT_" + String(chipId, HEX);
-  saveConfigToEEPROM();  // 保存新的客户端ID
+  
+  // 避免重复保存，只在需要时保存
+  // saveConfigToEEPROM();  // 注释掉，避免每次启动都保存
   
   // 初始化系统启动时间
   systemStartTime = millis();
@@ -384,7 +415,7 @@ void loop() {
   handleUSBSerial();
   
   // ========== UART2透传 ==========
-  handleUART2ToDebug();  // UART2 RX → 调试串口显示
+  handleHighSpeedUART();  // UART2 RX → 调试串口 + TCP
   
   // 处理Web服务器（日志查看）
   handleWebServer();

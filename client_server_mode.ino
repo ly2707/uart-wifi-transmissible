@@ -76,7 +76,8 @@ void initClientMode() {
   
   unsigned long startTime = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(100);
+    yield();
     if (debugMode) {
       Serial.print(".");
     }
@@ -118,26 +119,25 @@ void runClientMode() {
   static unsigned long lastConnectAttempt = 0;
   const unsigned long reconnectionInterval = 5000;
   
-  if (!wifiConnected) {
-    Serial.println("WiFi disconnected, attempting reconnect...");
+  if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
+    wifiConnected = false;
+    tcpConnected = false;
     WiFi.begin(client_wifi_ssid, client_wifi_password);
     
     unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      if (millis() - startTime > 10000) {
-        Serial.println("WiFi reconnect failed");
-        break;
-      }
+    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
+      delay(10);
+      yield();
     }
     
     if (WiFi.status() == WL_CONNECTED) {
       wifiConnected = true;
       Serial.println("WiFi reconnected");
+      connectToServer();
     }
   }
   
-  if (!tcpConnected) {
+  if (!tcpConnected && wifiConnected) {
     if (millis() - lastConnectAttempt > reconnectionInterval) {
       connectToServer();
       lastConnectAttempt = millis();
@@ -145,19 +145,13 @@ void runClientMode() {
   }
   
   if (tcpConnected && tcpClient.available()) {
-    String data = tcpClient.readStringUntil('\n');
-    data.trim();
+    size_t available = tcpClient.available();
+    size_t toRead = min(available, (size_t)256);
+    uint8_t buf[256];
+    size_t readBytes = tcpClient.read(buf, toRead);
     
-    if (data.length() > 0) {
-      Serial2.println(data);
-      
-      if (logToSD) {
-        saveDataToSD("[Server] " + data, client_id, false);
-      }
-      
-      if (debugMode) {
-        Serial.println("[Server] " + data);
-      }
+    for (size_t i = 0; i < readBytes; i++) {
+      Serial2.write(buf[i]);
     }
   }
   
@@ -165,24 +159,6 @@ void runClientMode() {
     Serial.println("TCP disconnected");
     tcpClient.stop();
     tcpConnected = false;
-  }
-  
-  if (tcpConnected && Serial2.available()) {
-    String data = Serial2.readStringUntil('\n');
-    data.trim();
-    
-    if (data.length() > 0) {
-      String formattedData = "CLIENT_ID:" + client_id + "|TIMESTAMP:" + String(millis()) + "|DATA:" + data;
-      tcpClient.println(formattedData);
-      
-      if (logToSD) {
-        saveDataToSD("[UART2] " + data, client_id, false);
-      }
-      
-      if (debugMode) {
-        Serial.println("[UART2] " + data);
-      }
-    }
   }
 }
 
@@ -230,13 +206,9 @@ void runServerMode() {
     
     if (freeSlot >= 0) {
       serverClients[freeSlot] = newClient;
-      Serial.println("[Client " + String(freeSlot) + "] Connected: " + newClient.remoteIP().toString());
-      
       clientSerialData[freeSlot] = "// Serial data log\n";
-      
       serverClients[freeSlot].println("Welcome to ESP32 UART Server");
     } else {
-      Serial.println("Client limit reached");
       newClient.println("Server client limit reached");
       newClient.stop();
     }
@@ -244,73 +216,21 @@ void runServerMode() {
   
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected()) {
-      if (serverClients[i].available()) {
-        String data = serverClients[i].readStringUntil('\n');
-        data.trim();
+      size_t available = serverClients[i].available();
+      if (available > 0) {
+        size_t toRead = min(available, (size_t)256);
+        uint8_t buf[256];
+        size_t readBytes = serverClients[i].read(buf, toRead);
         
-        if (data.length() > 0) {
-          String clientId = parseClientId(data);
-          
-          int dataIndex = data.indexOf("|DATA:");
-          String actualData = (dataIndex >= 0) ? data.substring(dataIndex + 6) : data;
-          
-          Serial2.println(actualData);
-          
-          clientSerialData[i] += "[Client] " + actualData + "\n";
-          if (clientSerialData[i].length() > 2000) {
-            int lines = 0;
-            int pos = 0;
-            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
-              lines++;
-              pos++;
-            }
-            if (pos != -1) {
-              clientSerialData[i] = clientSerialData[i].substring(pos);
-            }
-          }
-          
-          if (logToSD) {
-            saveDataToSD("[Client " + String(i) + "] " + data, clientId, true);
-          }
-          
-          if (debugMode) {
-            Serial.println("[Client " + String(i) + "] " + data);
-          }
+        for (size_t j = 0; j < readBytes; j++) {
+          Serial2.write(buf[j]);
         }
-      }
-      
-      if (Serial2.available()) {
-        String data = Serial2.readStringUntil('\n');
-        data.trim();
         
-        if (data.length() > 0) {
-          serverClients[i].println(data);
-          
-          clientSerialData[i] += "[UART2] " + data + "\n";
-          if (clientSerialData[i].length() > 2000) {
-            int lines = 0;
-            int pos = 0;
-            while (lines < 50 && (pos = clientSerialData[i].indexOf('\n', pos)) != -1) {
-              lines++;
-              pos++;
-            }
-            if (pos != -1) {
-              clientSerialData[i] = clientSerialData[i].substring(pos);
-            }
-          }
-          
-          if (logToSD) {
-            String clientId = "SERVER";
-            saveDataToSD("[UART2] " + data, clientId, true);
-          }
-          
-          if (debugMode) {
-            Serial.println("[UART2] " + data);
-          }
+        if (clientSerialData[i].length() > 2000) {
+          clientSerialData[i] = clientSerialData[i].substring(clientSerialData[i].length() - 1500);
         }
       }
     } else if (serverClients[i]) {
-      Serial.println("[Client " + String(i) + "] Disconnected");
       serverClients[i].stop();
     }
   }

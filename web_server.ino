@@ -1,11 +1,13 @@
-﻿// ==================== Web服务器和页面处理 ====================
+// ==================== Web服务器和页面处理 ====================
 void initWebServer() {
   if (webServerEnabled && (wifiConnected || currentMode == MODE_SERVER)) {
     webServer.begin();
+    String ipStr = (currentMode == MODE_SERVER) ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
     Serial.println("✓ Web服务器启动成功");
-    Serial.println("  访问地址: http://" + WiFi.localIP().toString());
-    Serial.println("  日志查看: http://" + WiFi.localIP().toString() + "/logs");
-    Serial.println("  系统状态: http://" + WiFi.localIP().toString() + "/status");
+    Serial.println("  访问地址: http://" + ipStr);
+    Serial.println("  日志查看: http://" + ipStr + "/logs");
+    Serial.println("  系统状态: http://" + ipStr + "/status");
+    Serial.println("  串口监视器: http://" + ipStr + "/serial");
   }
 }
 
@@ -21,8 +23,19 @@ void handleWebServer() {
     // 路由处理
     if (request.indexOf("GET / ") >= 0) {
       handleRootPage(client);
-    } else if (request.indexOf("GET /serial") >= 0) {
-      handleSerialData(client);
+    } else if (request.indexOf("GET /favicon") >= 0) {
+      client.println("HTTP/1.1 204 No Content");
+      client.println();
+    } else if (request.indexOf("GET /serial ") >= 0 || request.indexOf("GET /serial") >= 0) {
+      if (request.indexOf("GET /serial/data") >= 0) {
+        handleSerialDataAPI(client);
+      } else {
+        handleSerialPage(client);
+      }
+    } else if (request.indexOf("POST /serial/send") >= 0) {
+      handleSerialSend(client, request);
+    } else if (request.indexOf("POST /serial/clear") >= 0) {
+      handleSerialClear(client);
     } else if (request.indexOf("GET /logs") >= 0) {
       handleLogsPage(client, request);
     } else if (request.indexOf("GET /preview") >= 0) {
@@ -31,6 +44,8 @@ void handleWebServer() {
       handleStatusPage(client);
     } else if (request.indexOf("GET /client") >= 0) {
       handleClientPage(client, request);
+    } else if (request.indexOf("POST /client/send") >= 0) {
+      handleClientSend(client, request);
     } else if (request.indexOf("GET /config ") >= 0) {
       handleConfigPage(client);
     } else if (request.indexOf("POST /saveconfig") >= 0) {
@@ -92,6 +107,7 @@ void handleRootPage(WiFiClient client) {
   html += "<strong>UART1↔UART2透传:</strong> 已启用<br>";  // 透传功能
   html += "</div>";
   html += "<div class='menu'>";
+  html += "<a href='/serial'>🖥️ 串口监视器</a>";
   html += "<a href='/logs'>📋 查看日志</a>";
   html += "<a href='/status'>📊 系统状态</a>";
   html += "<a href='/config'>⚙️ 系统配置</a>";
@@ -132,10 +148,10 @@ void handleLogsPage(WiFiClient client, String request) {
   html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
   html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
   html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
-  html += "h2{font-size:16px;}";
+  html += "h2{font-size:16px;word-break:break-all;line-height:1.4;margin:10px 0;}";
   html += ".file-list{margin:15px 0;}";
   html += ".file-item{padding:10px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;}";
-  html += ".file-name{flex:1;min-width:150px;word-break:break-all;}";
+  html += ".file-name{flex:1;min-width:150px;word-break:break-all;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;}";
   html += ".file-name a{text-decoration:none;color:#333;font-size:13px;}";
   html += ".file-name a:hover{color:#4CAF50;}";
   html += ".file-actions{display:flex;gap:8px;flex-shrink:0;margin-left:10px;}";
@@ -190,17 +206,24 @@ void handleLogsPage(WiFiClient client, String request) {
       int slashPos = 0;
       while ((slashPos = relativePath.indexOf('/')) != -1) {
         String subDir = relativePath.substring(0, slashPos);
+        if (subDir.length() > 20) subDir = subDir.substring(0, 17) + "...";
         html += " → <a href='/logs?dir=" + subDir + "'>" + subDir + "</a>";
         relativePath = relativePath.substring(slashPos + 1);
       }
       if (relativePath.length() > 0) {
-        html += " → " + relativePath;
+        String displayLast = relativePath;
+        if (displayLast.length() > 25) displayLast = displayLast.substring(0, 22) + "...";
+        html += " → " + displayLast;
       }
     }
     html += "</div>";
     
     // 列出当前目录内容
-    html += "<h2>" + currentDir + "</h2>";
+    String displayDir = currentDir;
+    if (displayDir.length() > 50) {
+      displayDir = "..." + displayDir.substring(displayDir.length() - 47);
+    }
+    html += "<h2>" + displayDir + "</h2>";
     html += "<div class='file-list'>";
     File root = SD.open(currentDir);
     if (root) {
@@ -349,14 +372,18 @@ void handleStatusPage(WiFiClient client) {
   
   // 客户端连接信息（服务器模式）
   if (currentMode == MODE_SERVER) {
+    int clientCount = getConnectedClientCount();
     html += "<div class='status'>";
     html += "<h2>客户端连接</h2>";
-    int clientCount = getConnectedClientCount();
     html += "<strong>当前连接数:</strong> " + String(clientCount) + "<br>";
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (serverClients[i] && serverClients[i].connected()) {
-        html += "<strong>客户端 " + String(i) + "</strong>: " + serverClients[i].remoteIP().toString() + "<br>";
+        html += "<a href='/client?client_id=" + String(i) + "' style='display:inline-block;padding:8px 12px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;margin:5px 0;'>";
+        html += "客户端 " + String(i) + ": " + serverClients[i].remoteIP().toString() + " → 点击查看数据</a><br>";
       }
+    }
+    if (clientCount == 0) {
+      html += "<em>暂无客户端连接</em><br>";
     }
     html += "</div>";
   }
@@ -368,72 +395,146 @@ void handleStatusPage(WiFiClient client) {
 }
 
 void handleClientPage(WiFiClient client, String request) {
-  // 解析客户端ID
-  int clientIdStart = request.indexOf("client_id=") + 10;
-  int clientIdEnd = request.indexOf("&", clientIdStart);
-  if (clientIdEnd == -1) clientIdEnd = request.length();
-  String clientId = request.substring(clientIdStart, clientIdEnd);
+  // 解析客户端索引
+  int clientIdx = -1;
+  int idxStart = request.indexOf("client_id=") + 10;
+  int idxEnd = request.indexOf("&", idxStart);
+  if (idxEnd == -1) idxEnd = request.length();
+  String clientIdParam = request.substring(idxStart, idxEnd);
+  clientIdx = clientIdParam.toInt();
+  
+  // 检查刷新请求
+  bool isRefresh = (request.indexOf("refresh=1") > 0);
+  
+  if (isRefresh) {
+    // 返回纯文本数据用于AJAX刷新
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println();
+    
+    if (clientIdx >= 0 && clientIdx < MAX_CLIENTS) {
+      client.print(clientSerialData[clientIdx]);
+    }
+    return;
+  }
+  
+  // 检查客户端是否有效
+  if (clientIdx < 0 || clientIdx >= MAX_CLIENTS || !serverClients[clientIdx] || !serverClients[clientIdx].connected()) {
+    client.println("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n");
+    client.print("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>");
+    client.print("<h1>客户端不存在或已断开</h1>");
+    client.print("<a href='/'>返回首页</a></body></html>");
+    return;
+  }
   
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
-  html += "<title>客户端 " + clientId + " - ESP32 UART</title>";
-  html += "<style>body{font-family:Arial;margin:10px;background:#f0f0f0;font-size:16px;}";
-  html += ".container{max-width:100%;margin:0 auto;background:white;padding:15px;border-radius:10px;box-sizing:border-box;}";
-  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:10px;font-size:24px;}";
-  html += "h2{font-size:20px;}";
-  html += ".serial-data{background:#f8f8f8;border:1px solid #ddd;padding:15px;margin:15px 0;height:300px;overflow-y:scroll;font-family:monospace;font-size:14px;white-space:pre-wrap;word-wrap:break-word;}";
-  html += ".command-form{margin:20px 0;}";
-  html += ".command-form input[type='text']{width:80%;padding:10px;font-size:16px;}";
-  html += ".command-form input[type='submit']{width:18%;padding:10px;font-size:16px;background:#4CAF50;color:white;border:none;border-radius:5px;cursor:pointer;}";
-  html += ".back{margin-top:20px;}";
-  html += ".back a{display:inline-block;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:5px;}";
-  html += ".back a:hover{background:#45a049;}";
-  html += "@media screen and (min-width: 600px) {";
-  html += ".container{max-width:800px;padding:20px;}";
+  html += "<title>客户端 " + String(clientIdx) + " - ESP32 UART</title>";
+  html += "<style>";
+  html += "*{box-sizing:border-box;margin:0;padding:0;}";
+  html += "body{font-family:'Consolas','Monaco',monospace;margin:0;background:#1e1e1e;color:#0f0;height:100vh;display:flex;flex-direction:column;}";
+  html += ".header{background:#2d2d2d;padding:12px 15px;border-bottom:1px solid #444;}";
+  html += ".header h1{color:#4CAF50;font-size:18px;}";
+  html += ".header-info{color:#888;font-size:12px;margin-top:5px;}";
+  html += ".serial-container{flex:1;display:flex;flex-direction:column;overflow:hidden;}";
+  html += ".serial-output{flex:1;background:#1a1a1a;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
+  html += ".serial-output::-webkit-scrollbar{width:10px;}";
+  html += ".serial-output::-webkit-scrollbar-track{background:#2d2d2d;}";
+  html += ".serial-output::-webkit-scrollbar-thumb{background:#555;border-radius:5px;}";
+  html += ".input-area{background:#2d2d2d;padding:12px;display:flex;gap:8px;border-top:1px solid #444;}";
+  html += ".input-area input[type='text']{flex:1;padding:10px 12px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:14px;font-family:inherit;}";
+  html += ".input-area input[type='text']:focus{outline:none;border-color:#4CAF50;}";
+  html += ".input-area input[type='submit']{padding:10px 20px;background:#4CAF50;color:white;border:none;border-radius:4px;font-size:14px;cursor:pointer;transition:all 0.2s;}";
+  html += ".input-area input[type='submit']:hover{background:#45a049;}";
+  html += ".back-btn{background:#2196F3 !important;}";
+  html += ".back-btn:hover{background:#1976D2 !important;}";
+  html += "@media screen and (max-width: 600px){";
+  html += ".input-area{flex-direction:column;}";
+  html += ".input-area input[type='submit']{width:100%;}";
+  html += ".serial-output{font-size:12px;}";
   html += "}";
   html += "</style></head><body>";
-  html += "<div class='container'>";
-  html += "<h1>客户端 " + clientId + " - 串口实时数据</h1>";
+  html += "<div class='header'>";
+  html += "<h1>🖥️ 客户端 " + String(clientIdx) + " - 串口数据</h1>";
+  html += "<div class='header-info'>IP: " + serverClients[clientIdx].remoteIP().toString() + " | 波特率: " + String(uart2BaudRate) + "</div>";
+  html += "</div>";
+  html += "<div class='serial-container'>";
+  html += "<textarea class='serial-output' id='serialData' readonly>" + clientSerialData[clientIdx] + "</textarea>";
+  html += "</div>";
+  html += "<div class='input-area'>";
+  html += "<input type='text' id='serialInput' placeholder='输入命令...' autocomplete='off'>";
+  html += "<input type='submit' value='发送' onclick='sendData()'>";
+  html += "<input type='submit' value='返回' class='back-btn' onclick=\"location.href='/'\">";
+  html += "</div>";
+  html += "<script>";
+  html += "var clientIdx = " + String(clientIdx) + ";";
+  html += "function fetchSerialData(){";
+  html += "  var xhr = new XMLHttpRequest();";
+  html += "  xhr.open('GET', '/client?client_id=" + String(clientIdx) + "&refresh=1', true);";
+  html += "  xhr.onreadystatechange = function(){";
+  html += "    if(xhr.readyState == 4 && xhr.status == 200){";
+  html += "      var data = xhr.responseText;";
+  html += "      if(data.length > 0){";
+  html += "        var output = document.getElementById('serialData');";
+  html += "        var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
+  html += "        output.value = data;";
+  html += "        if(wasAtBottom){";
+  html += "          output.scrollTop = output.scrollHeight;";
+  html += "        }";
+  html += "      }";
+  html += "    }";
+  html += "  };";
+  html += "  xhr.send();";
+  html += "}";
+  html += "function sendData(){";
+  html += "  var input = document.getElementById('serialInput');";
+  html += "  if(input.value.trim() === '') return;";
+  html += "  var xhr = new XMLHttpRequest();";
+  html += "  xhr.open('POST', '/client/send?client_id=" + String(clientIdx) + "', true);";
+  html += "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');";
+  html += "  xhr.send('data=' + encodeURIComponent(input.value));";
+  html += "  var output = document.getElementById('serialData');";
+  html += "  output.value += '[发送] ' + input.value + '\\n';";
+  html += "  output.scrollTop = output.scrollHeight;";
+  html += "  input.value = '';";
+  html += "}";
+  html += "document.getElementById('serialInput').addEventListener('keypress', function(e){";
+  html += "  if(e.key === 'Enter'){";
+  html += "    sendData();";
+  html += "    e.preventDefault();";
+  html += "  }";
+  html += "});";
+  html += "document.getElementById('serialData').scrollTop = document.getElementById('serialData').scrollHeight;";
+  html += "setInterval(fetchSerialData, 500);";
+  html += "</script>";
+  html += "</body></html>";
+  client.print(html);
+}
+
+void handleClientSend(WiFiClient client, String request) {
+  int clientIdx = -1;
+  int idxStart = request.indexOf("client_id=") + 10;
+  int idxEnd = request.indexOf("&", idxStart);
+  if (idxEnd == -1) idxEnd = request.length();
+  String clientIdxStr = request.substring(idxStart, idxEnd);
+  clientIdx = clientIdxStr.toInt();
   
-  // 串口数据显示
-  html += "<div class='serial-data' id='serialData'>";
-  // 查找对应的客户端数据
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (serverClients[i] && serverClients[i].connected()) {
-      // 这里简化处理，实际应该根据客户端ID查找
-      html += clientSerialData[i];
-      break;
+  int dataIndex = request.indexOf("data=") + 5;
+  int dataEnd = request.indexOf("&", dataIndex);
+  if (dataEnd == -1) dataEnd = request.length();
+  String data = request.substring(dataIndex, dataEnd);
+  data = urlDecode(data);
+  
+  if (clientIdx >= 0 && clientIdx < MAX_CLIENTS && serverClients[clientIdx] && serverClients[clientIdx].connected()) {
+    if (data.length() > 0) {
+      serverClients[clientIdx].println(data);
+      clientSerialData[clientIdx] += "[发送] " + data + "\n";
     }
   }
-  html += "</div>";
   
-  // 发送命令表单
-  html += "<form class='command-form' action='/client' method='post'>";
-  html += "<input type='hidden' name='client_id' value='" + clientId + "'>";
-  html += "<input type='text' name='command' placeholder='输入命令...' autocomplete='off'>";
-  html += "<input type='submit' value='发送'>";
-  html += "</form>";
-  
-  // 自动刷新脚本
-  html += "<script>";
-  html += "setInterval(function() {";
-  html += "  var xhr = new XMLHttpRequest();";
-  html += "  xhr.open('GET', '/client?client_id=" + clientId + "&refresh=1', true);";
-  html += "  xhr.onreadystatechange = function() {";
-  html += "    if (xhr.readyState == 4 && xhr.status == 200) {";
-  html += "      document.getElementById('serialData').innerHTML = xhr.responseText;";
-  html += "      var serialData = document.getElementById('serialData');";
-  html += "      serialData.scrollTop = serialData.scrollHeight;";
-  html += "    }";
-  html += "  }";
-  html += "  xhr.send();";
-  html += "}, 1000);";
-  html += "</script>";
-  
-  html += "<div class='back'><a href='/'>返回首页</a></div>";
-  html += "</div>";
-  html += "</body></html>";
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='0;url=/client?client_id=" + String(clientIdx) + "'></head></html>";
   client.print(html);
 }
 
@@ -857,12 +958,170 @@ void handlePreviewLog(WiFiClient client, String request) {
   }
 }
 
-// 处理串口数据请求
-void handleSerialData(WiFiClient client) {
+// ==================== 串口实时显示页面 ====================
+void handleSerialPage(WiFiClient client) {
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
+  html += "<title>串口监视器 - ESP32 UART</title>";
+  html += "<style>";
+  html += "*{box-sizing:border-box;margin:0;padding:0;}";
+  html += "body{font-family:'Consolas','Monaco',monospace;margin:0;background:#1e1e1e;color:#0f0;height:100vh;display:flex;flex-direction:column;}";
+  html += ".header{background:#2d2d2d;padding:12px 15px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #444;}";
+  html += ".header h1{color:#4CAF50;font-size:18px;}";
+  html += ".header-info{color:#888;font-size:12px;}";
+  html += ".serial-container{flex:1;display:flex;flex-direction:column;overflow:hidden;}";
+  html += ".serial-output{flex:1;background:#1a1a1a;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
+  html += ".serial-output::-webkit-scrollbar{width:10px;}";
+  html += ".serial-output::-webkit-scrollbar-track{background:#2d2d2d;}";
+  html += ".serial-output::-webkit-scrollbar-thumb{background:#555;border-radius:5px;}";
+  html += ".serial-output::-webkit-scrollbar-thumb:hover{background:#777;}";
+  html += ".input-area{background:#2d2d2d;padding:12px;display:flex;gap:8px;border-top:1px solid #444;}";
+  html += ".input-area input[type='text']{flex:1;padding:10px 12px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;font-size:14px;font-family:inherit;}";
+  html += ".input-area input[type='text']:focus{outline:none;border-color:#4CAF50;}";
+  html += ".input-area input[type='submit']{padding:10px 20px;background:#4CAF50;color:white;border:none;border-radius:4px;font-size:14px;cursor:pointer;transition:all 0.2s;}";
+  html += ".input-area input[type='submit']:hover{background:#45a049;}";
+  html += ".btn-clear{background:#f44336 !important;}";
+  html += ".btn-clear:hover{background:#d32f2f !important;}";
+  html += ".status-bar{background:#333;padding:8px 15px;font-size:12px;color:#888;display:flex;justify-content:space-between;}";
+  html += ".online{color:#4CAF50;}";
+  html += "@media screen and (max-width: 600px){";
+  html += ".header{flex-direction:column;gap:8px;align-items:flex-start;}";
+  html += ".input-area{flex-direction:column;}";
+  html += ".input-area input[type='submit']{width:100%;}";
+  html += ".serial-output{font-size:12px;}";
+  html += "}";
+  html += "</style></head><body>";
+  html += "<div class='header'>";
+  html += "<h1>🖥️ 串口监视器</h1>";
+  html += "<div class='header-info'>波特率: " + String(uart2BaudRate) + " | 模式: " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "</div>";
+  html += "</div>";
+  html += "<div class='serial-container'>";
+  html += "<textarea class='serial-output' id='serialOutput' readonly></textarea>";
+  html += "</div>";
+  html += "<div class='input-area'>";
+  html += "<input type='text' id='serialInput' placeholder='输入命令...' autocomplete='off'>";
+  html += "<input type='submit' value='发送' onclick='sendData()'>";
+  html += "<input type='submit' value='清空' class='btn-clear' onclick='clearSerial()'>";
+  html += "</div>";
+  html += "<div class='status-bar'>";
+  html += "<span>连接状态: <span class='online' id='connStatus'>在线</span></span>";
+  html += "<span id='bufferStatus'>缓冲区: 0 字符</span>";
+  html += "<span>最后更新: <span id='lastUpdate'>--</span></span>";
+  html += "</div>";
+  html += "<script>";
+  html += "var lastDataLen = 0;";
+  html += "var lastTimestamp = 0;";
+  html += "function fetchSerialData(){";
+  html += "  var xhr = new XMLHttpRequest();";
+  html += "  xhr.open('GET', '/serial/data', true);";
+  html += "  xhr.onreadystatechange = function(){";
+  html += "    if(xhr.readyState == 4 && xhr.status == 200){";
+  html += "      var data = xhr.responseText;";
+  html += "      if(data.length > 0){";
+  html += "        var output = document.getElementById('serialOutput');";
+  html += "        var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
+  html += "        output.value += data;";
+  html += "        if(wasAtBottom){";
+  html += "          output.scrollTop = output.scrollHeight;";
+  html += "        }";
+  html += "        if(output.value.length > 50000){";
+  html += "          output.value = output.value.substring(output.value.length - 40000);";
+  html += "        }";
+  html += "      }";
+  html += "      var now = new Date();";
+  html += "      document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();";
+  html += "      document.getElementById('bufferStatus').textContent = '缓冲区: ' + output.value.length + ' 字符';";
+  html += "    }";
+  html += "  };";
+  html += "  xhr.send();";
+  html += "}";
+  html += "function sendData(){";
+  html += "  var input = document.getElementById('serialInput');";
+  html += "  if(input.value.trim() === '') return;";
+  html += "  var xhr = new XMLHttpRequest();";
+  html += "  xhr.open('POST', '/serial/send', true);";
+  html += "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');";
+  html += "  xhr.send('data=' + encodeURIComponent(input.value));";
+  html += "  var output = document.getElementById('serialOutput');";
+  html += "  output.value += '[发送] ' + input.value + '\\n';";
+  html += "  output.scrollTop = output.scrollHeight;";
+  html += "  input.value = '';";
+  html += "}";
+  html += "function clearSerial(){";
+  html += "  var xhr = new XMLHttpRequest();";
+  html += "  xhr.open('POST', '/serial/clear', true);";
+  html += "  xhr.send();";
+  html += "  document.getElementById('serialOutput').value = '';";
+  html += "}";
+  html += "document.getElementById('serialInput').addEventListener('keypress', function(e){";
+  html += "  if(e.key === 'Enter'){";
+  html += "    sendData();";
+  html += "    e.preventDefault();";
+  html += "  }";
+  html += "});";
+  html += "setInterval(fetchSerialData, 200);";
+  html += "fetchSerialData();";
+  html += "</script>";
+  html += "</body></html>";
+  client.print(html);
+}
+
+void handleSerialDataAPI(WiFiClient client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/plain");
+  client.println("Cache-Control: no-cache, no-store, must-revalidate");
   client.println();
   
-  // 这里可以返回实时串口数据
-  client.print("等待数据...");
+  noInterrupts();
+  String dataToSend = serialDisplayBuffer;
+  serialDisplayBuffer = "";
+  interrupts();
+  
+  client.print(dataToSend);
+}
+
+void handleSerialSend(WiFiClient client, String request) {
+  int dataIndex = request.indexOf("data=") + 5;
+  int dataEnd = request.indexOf("&", dataIndex);
+  if (dataEnd == -1) dataEnd = request.length();
+  String data = request.substring(dataIndex, dataEnd);
+  data = urlDecode(data);
+  
+  if (data.length() > 0) {
+    Serial2.println(data);
+  }
+  
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='0;url=/serial '></head></html>";
+  client.print(html);
+}
+
+void handleSerialClear(WiFiClient client) {
+  noInterrupts();
+  serialDisplayBuffer = "";
+  interrupts();
+  
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head></head><body></body></html>";
+  client.print(html);
+}
+
+void appendToSerialBuffer(char c) {
+  serialDisplayBuffer += String(c);
+  if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
+    serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
+  }
+}
+
+void appendToSerialBuffer(const char* str) {
+  serialDisplayBuffer += String(str);
+  if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
+    serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
+  }
+}
+
+// 处理串口数据请求（兼容旧接口）
+void handleSerialData(WiFiClient client) {
+  handleSerialPage(client);
 }
