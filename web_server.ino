@@ -95,11 +95,10 @@ void handleWebServer() {
   } else {
     handleNotFound(client);
   }
-    
-    delay(10);
-    client.stop();
-    yield();
-  }
+  
+  delay(10);
+  client.stop();
+  yield();
 }
 
 void handleRootPage(WiFiClient client) {
