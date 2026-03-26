@@ -1,6 +1,6 @@
 // ==================== UART Interrupt Transparent Mode ====================
 
-#define UART_RING_BUFFER_SIZE 8192
+#define UART_RING_BUFFER_SIZE 16384
 
 volatile uint8_t uart2RingBuffer[UART_RING_BUFFER_SIZE];
 volatile uint16_t uart2RingHead = 0;
@@ -112,7 +112,11 @@ void handleHighSpeedUARTWithWebBuffer() {
   flushTCPBuffer();
   
   if (uart2RingOverflow) {
-    Serial.println("\nUART2 buffer overflow");
+    static unsigned long lastOverflowPrint = 0;
+    if (millis() - lastOverflowPrint > 5000) {
+      Serial.println("\nUART2 buffer overflow - data may be lost");
+      lastOverflowPrint = millis();
+    }
     uart2RingOverflow = false;
   }
 }
