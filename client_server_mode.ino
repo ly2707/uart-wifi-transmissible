@@ -245,7 +245,7 @@ void runServerMode() {
             clientLineBuffer[i] += '\n';
             
             if (clientLineBuffer[i].length() > 1) {
-              if (logToSD) {
+              if (logToSD && sdCardReady) {
                 String logEntry = "[客户端";
                 logEntry += i;
                 logEntry += "] ";
@@ -272,6 +272,8 @@ void runServerMode() {
       clientLineBuffer[i] = "";
     }
   }
+  
+  yield();
 }
 
 String parseClientId(String data) {

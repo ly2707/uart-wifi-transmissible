@@ -421,8 +421,8 @@ void loop() {
   // ========== UART2透传 ==========
   handleHighSpeedUARTWithWebBuffer();  // UART2 RX → 调试串口 + TCP + Web缓冲区
   
-  // 处理Web服务器（日志查看）
-  handleWebServer();
+  // 处理Web服务器（日志查看）(暂时禁用以测试稳定性)
+  // handleWebServer();
   
   // 根据模式执行不同逻辑（低功耗功能已禁用）
   // if (!lowPowerMode) {
@@ -436,8 +436,8 @@ void loop() {
   //   handleLowPowerMode();
   // }
   
-  // 更新LED状态
-  updateLEDStatus();
+  // 更新LED状态 (暂时禁用以测试稳定性)
+  // updateLEDStatus();
   
   yield();
 }

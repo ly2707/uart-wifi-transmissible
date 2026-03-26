@@ -146,20 +146,23 @@ void saveDataToSD(String data, String clientId, bool isServer) {
   
   char path[128];
   char safeClientId[32];
+  char clientDir[64];
   
   clientId.toCharArray(safeClientId, sizeof(safeClientId));
   sanitizeFilenameInPlace(safeClientId);
   
   if (isServer) {
-    snprintf(path, sizeof(path), "/server/%s/%s_%s_%s.txt", 
-             safeClientId, logFileName.c_str(), safeClientId, getDateString().c_str());
+    snprintf(clientDir, sizeof(clientDir), "/server/%s", safeClientId);
+    snprintf(path, sizeof(path), "%s/%s_%s_%s.txt", 
+             clientDir, logFileName.c_str(), safeClientId, getDateString().c_str());
     createDirectory("/server");
-    createDirectory(("/server/" + String(safeClientId)).c_str());
+    createDirectory(clientDir);
   } else {
-    snprintf(path, sizeof(path), "/client/%s/%s_%s_%s.txt", 
-             safeClientId, logFileName.c_str(), safeClientId, getDateString().c_str());
+    snprintf(clientDir, sizeof(clientDir), "/client/%s", safeClientId);
+    snprintf(path, sizeof(path), "%s/%s_%s_%s.txt", 
+             clientDir, logFileName.c_str(), safeClientId, getDateString().c_str());
     createDirectory("/client");
-    createDirectory(("/client/" + String(safeClientId)).c_str());
+    createDirectory(clientDir);
   }
   
   File file = SD.open(path, FILE_APPEND);
