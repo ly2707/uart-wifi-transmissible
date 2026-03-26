@@ -96,8 +96,10 @@ void handleWebServer() {
     handleNotFound(client);
   }
     
-  delay(10);
-  client.stop();
+    delay(10);
+    client.stop();
+    yield();
+  }
 }
 
 void handleRootPage(WiFiClient client) {
@@ -1149,24 +1151,22 @@ void handleSerialDataAPI(WiFiClient client) {
   client.println("Cache-Control: no-cache, no-store, must-revalidate");
   client.println();
   
-  noInterrupts();
-  
-  client.print(serialDisplayBuffer);
+  String response = serialDisplayBuffer;
   serialDisplayBuffer = "";
   
   if (currentMode == MODE_SERVER) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
-        client.print("[客户端");
-        client.print(i);
-        client.print("] ");
-        client.print(clientSerialData[i]);
+        response += "[客户端";
+        response += i;
+        response += "] ";
+        response += clientSerialData[i];
         clientSerialData[i] = "";
       }
     }
   }
   
-  interrupts();
+  client.print(response);
 }
 
 void handleSerialSend(WiFiClient client, String request) {
