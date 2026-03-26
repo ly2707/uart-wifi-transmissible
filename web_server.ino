@@ -1054,7 +1054,10 @@ void handleSerialPage(WiFiClient client) {
   html += "}";
   html += "</style></head><body>";
   html += "<div class='header'>";
-  html += "<h1>🖥️ 串口监视器</h1>";
+  html += "<div style='display:flex;align-items:center;gap:10px;'>";
+  html += "<a href='/' style='color:#4CAF50;text-decoration:none;font-size:14px;'>← 首页</a>";
+  html += "<h1 style='margin:0;'>🖥️ 串口监视器</h1>";
+  html += "</div>";
   html += "<div class='header-info'>波特率: " + String(uart2BaudRate) + " | 模式: " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "</div>";
   html += "<select id='sourceSelect' onchange='changeSource()' style='background:#333;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
   html += "<option value='server'>服务器全局</option>";
@@ -1087,6 +1090,16 @@ void handleSerialPage(WiFiClient client) {
   html += "  currentSource = document.getElementById('sourceSelect').value;";
   html += "  document.getElementById('serialOutput').value = serialData[currentSource] || '';";
   html += "  document.getElementById('serialOutput').scrollTop = document.getElementById('serialOutput').scrollHeight;";
+  html += "  history.replaceState(null, '', '?source=' + currentSource);";
+  html += "}";
+  html += "function initSource(){";
+  html += "  var params = new URLSearchParams(window.location.search);";
+  html += "  var savedSource = params.get('source');";
+  html += "  if(savedSource && document.getElementById('sourceSelect').querySelector('option[value=\"' + savedSource + '\"]')){";
+  html += "    currentSource = savedSource;";
+  html += "    document.getElementById('sourceSelect').value = currentSource;";
+  html += "  }";
+  html += "  document.getElementById('serialOutput').value = serialData[currentSource] || '';";
   html += "}";
   html += "function fetchSerialData(){";
   html += "  var xhr = new XMLHttpRequest();";
@@ -1137,6 +1150,7 @@ void handleSerialPage(WiFiClient client) {
   html += "    e.preventDefault();";
   html += "  }";
   html += "});";
+  html += "initSource();";
   html += "setInterval(fetchSerialData, 200);";
   html += "fetchSerialData();";
   html += "</script>";
