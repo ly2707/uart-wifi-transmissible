@@ -241,18 +241,22 @@ void runServerMode() {
           
           char c = buf[j];
           if (c == '\n') {
-            clientSerialData[i] += "\n";
-            clientLineBuffer[i] += "\n";
+            clientSerialData[i] += '\n';
+            clientLineBuffer[i] += '\n';
             
             if (clientLineBuffer[i].length() > 1) {
               if (logToSD) {
-                saveDataToSD("[客户端" + String(i) + "] " + clientLineBuffer[i], "SERVER", true);
+                String logEntry = "[客户端";
+                logEntry += i;
+                logEntry += "] ";
+                logEntry += clientLineBuffer[i];
+                saveDataToSD(logEntry, "SERVER", true);
               }
             }
             clientLineBuffer[i] = "";
           } else if (c != '\r') {
-            clientSerialData[i] += String(c);
-            clientLineBuffer[i] += String(c);
+            clientSerialData[i] += c;
+            clientLineBuffer[i] += c;
           }
         }
         
