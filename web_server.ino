@@ -1076,13 +1076,11 @@ void handleSerialPage(WiFiClient client) {
   html += "        if(serialData[currentSource].length > 50000){";
   html += "          serialData[currentSource] = serialData[currentSource].substring(serialData[currentSource].length - 40000);";
   html += "        }";
-  html += "        if(currentSource === 'server'){";
-  html += "          var output = document.getElementById('serialOutput');";
-  html += "          var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
-  html += "          output.value = serialData[currentSource];";
-  html += "          if(wasAtBottom){";
-  html += "            output.scrollTop = output.scrollHeight;";
-  html += "          }";
+  html += "        var output = document.getElementById('serialOutput');";
+  html += "        var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
+  html += "        output.value = serialData[currentSource];";
+  html += "        if(wasAtBottom){";
+  html += "          output.scrollTop = output.scrollHeight;";
   html += "        }";
   html += "      }";
   html += "      var now = new Date();";
@@ -1129,16 +1127,22 @@ void handleSerialDataAPI(WiFiClient client) {
   client.println("Cache-Control: no-cache, no-store, must-revalidate");
   client.println();
   
+  String response = "";
+  
   noInterrupts();
-  String response = serialDisplayBuffer;
+  
+  response = serialDisplayBuffer;
   serialDisplayBuffer = "";
   
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
-      response += clientSerialData[i];
-      clientSerialData[i] = "";
+  if (currentMode == MODE_SERVER) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
+        response += "[客户端" + String(i) + "] " + clientSerialData[i];
+        clientSerialData[i] = "";
+      }
     }
   }
+  
   interrupts();
   
   client.print(response);

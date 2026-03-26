@@ -239,7 +239,9 @@ void runServerMode() {
           Serial2.write(buf[j]);
           
           char c = buf[j];
-          if (c != '\r') {
+          if (c == '\n') {
+            clientSerialData[i] += "\n";
+          } else if (c != '\r') {
             clientSerialData[i] += String(c);
           }
         }
