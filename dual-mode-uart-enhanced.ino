@@ -243,6 +243,8 @@ void handleSaveConfig(WiFiClient client);
 void handleClientPage(WiFiClient client, String request);
 void handleClientSend(WiFiClient client, String request);
 void handleDeleteFile(WiFiClient client, String request);
+void handleDeleteDirectory(WiFiClient client, String request);
+bool deleteDirectoryRecursive(String path);
 void handleNotFound(WiFiClient client);
 void handleSerialPage(WiFiClient client);
 void handleSerialDataAPI(WiFiClient client);

@@ -88,6 +88,8 @@ void handleWebServer() {
     handleClearLog(client);
   } else if (request.indexOf("GET /delete") >= 0) {
     handleDeleteFile(client, request);
+  } else if (request.indexOf("GET /deletedir") >= 0) {
+    handleDeleteDirectory(client, request);
   } else if (request.indexOf("POST /power") >= 0) {
     handlePowerControl(client, request);
   } else {
@@ -302,6 +304,9 @@ void handleLogsPage(WiFiClient client, String request) {
           html += "<div class='file-item'>";
           html += "<div class='file-name'>";
           html += "<a href='/logs?dir=" + entryUrlPath + "'>📁 " + entryName + "</a>";
+          html += "</div>";
+          html += "<div class='file-actions'>";
+          html += "<a href='/deletedir?dir=" + entryPath + "' onclick='return confirm(\"确定删除文件夹 " + entryName + " 及所有内容？\")' style='background:#f44336;'>删除</a>";
           html += "</div>";
           html += "</div>";
         } else {
@@ -1229,4 +1234,83 @@ void handleDeleteFile(WiFiClient client, String request) {
     client.println();
     client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>文件不存在</h1><a href='/logs'>返回日志列表</a></body></html>");
   }
+}
+
+void handleDeleteDirectory(WiFiClient client, String request) {
+  int dirStart = request.indexOf("dir=") + 4;
+  int dirEnd = request.indexOf(" ", dirStart);
+  if (dirEnd == -1) dirEnd = request.length();
+  String dirPath = request.substring(dirStart, dirEnd);
+  dirPath = urlDecode(dirPath);
+  
+  if (dirPath.indexOf("..") != -1) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  if (!dirPath.startsWith("/server") && !dirPath.startsWith("/client")) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  if (SD.exists(dirPath)) {
+    if (deleteDirectoryRecursive(dirPath)) {
+      client.println("HTTP/1.1 302 Found");
+      client.println("Location: /logs");
+      client.println();
+    } else {
+      client.println("HTTP/1.1 500 Internal Server Error");
+      client.println("Content-Type: text/html");
+      client.println();
+      client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>删除失败</h1><a href='/logs'>返回日志列表</a></body></html>");
+    }
+  } else {
+    client.println("HTTP/1.1 302 Found");
+    client.println("Location: /logs");
+    client.println();
+  }
+}
+
+bool deleteDirectoryRecursive(String path) {
+  File root = SD.open(path);
+  if (!root) return false;
+  
+  if (!root.isDirectory()) {
+    root.close();
+    return false;
+  }
+  
+  bool success = true;
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) break;
+    
+    String entryPath = path + "/" + entry.name();
+    
+    if (entry.isDirectory()) {
+      if (!deleteDirectoryRecursive(entryPath)) {
+        success = false;
+      }
+    } else {
+      if (!SD.remove(entryPath)) {
+        success = false;
+      }
+    }
+    entry.close();
+  }
+  root.close();
+  
+  if (success) {
+    if (!SD.rmdir(path)) {
+      success = false;
+    }
+  }
+  
+  return success;
 }
