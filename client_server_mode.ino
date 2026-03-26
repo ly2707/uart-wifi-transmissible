@@ -172,7 +172,7 @@ void initServerMode() {
   WiFi.mode(WIFI_AP);
   
   // 降低WiFi发射功率以减少启动电流峰值
-  WiFi.setTxPower(WIFI_POWER_8dBm);
+  esp_wifi_set_max_tx_power(40);  // 40 = 10dBm (约40%)
   
   IPAddress localIP(192, 168, 1, 1);
   IPAddress gateway(192, 168, 1, 1);
