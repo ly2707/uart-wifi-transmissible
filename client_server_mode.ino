@@ -190,21 +190,34 @@ void initServerMode() {
     if (serverClients[i]) {
       serverClients[i].stop();
     }
+    clientSerialData[i] = "";
   }
 }
 
 void runServerMode() {
   WiFiClient newClient = tcpServer.available();
   if (newClient) {
+    IPAddress newIP = newClient.remoteIP();
+    int replaceSlot = -1;
     int freeSlot = -1;
+    
     for (int i = 0; i < MAX_CLIENTS; i++) {
-      if (!serverClients[i] || !serverClients[i].connected()) {
+      if (serverClients[i] && serverClients[i].connected()) {
+        if (serverClients[i].remoteIP() == newIP) {
+          replaceSlot = i;
+          break;
+        }
+      } else if (freeSlot < 0) {
         freeSlot = i;
-        break;
       }
     }
     
-    if (freeSlot >= 0) {
+    if (replaceSlot >= 0) {
+      serverClients[replaceSlot].stop();
+      serverClients[replaceSlot] = newClient;
+      clientSerialData[replaceSlot] = "// Reconnected\n";
+      serverClients[replaceSlot].println("Welcome back to ESP32 UART Server");
+    } else if (freeSlot >= 0) {
       serverClients[freeSlot] = newClient;
       clientSerialData[freeSlot] = "// Serial data log\n";
       serverClients[freeSlot].println("Welcome to ESP32 UART Server");
@@ -224,6 +237,11 @@ void runServerMode() {
         
         for (size_t j = 0; j < readBytes; j++) {
           Serial2.write(buf[j]);
+          
+          char c = buf[j];
+          if (c != '\r') {
+            clientSerialData[i] += String(c);
+          }
         }
         
         if (clientSerialData[i].length() > 2000) {

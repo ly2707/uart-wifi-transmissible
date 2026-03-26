@@ -84,71 +84,24 @@ void flushTCPBuffer() {
 }
 
 void handleHighSpeedUART() {
-  int ch;
-  static bool lastWasCR = false;
-  
-  while ((ch = readUART2Buffer()) >= 0) {
-    if (ch == '\r') {
-      lastWasCR = true;
-      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
-    } else if (ch == '\n') {
-      Serial.print("\r\n");
-      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
-      lastWasCR = false;
-    } else {
-      Serial.write((uint8_t)ch);
-      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
-      lastWasCR = false;
-    }
-    
-    if (tcpSendBufferLen >= TCP_SEND_BUFFER_SIZE) {
-      flushTCPBuffer();
-    }
-  }
-  
-  flushTCPBuffer();
-  
-  if (uart2RingOverflow) {
-    Serial.println("\nUART2 buffer overflow");
-    uart2RingOverflow = false;
-  }
+  handleHighSpeedUARTWithWebBuffer();
 }
 
 void handleHighSpeedUARTWithWebBuffer() {
-  static unsigned long lastCheck = 0;
-  
-  if (millis() - lastCheck > 3000) {
-    lastCheck = millis();
-  }
-  
   int ch;
-  static bool lastWasCR = false;
   
   while ((ch = readUART2Buffer()) >= 0) {
-    // \r或\n都产生新行
     if (ch == '\r') {
-      Serial.write('\r');
-      Serial.write('\n');
-      tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
-      appendToSerialBuffer("\r\n");
-      lastWasCR = true;
+      // 跳过\r，不输出
+      continue;
     } else if (ch == '\n') {
-      if (!lastWasCR) {
-        Serial.write('\r');
-        Serial.write('\n');
-        tcpSendBuffer[tcpSendBufferLen++] = '\r';
-        appendToSerialBuffer("\r\n");
-      } else {
-        Serial.write('\n');
-      }
+      Serial.print("\r\n");
       tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
       appendToSerialBuffer("\n");
-      lastWasCR = false;
     } else {
       Serial.write((uint8_t)ch);
       tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
       appendToSerialBuffer((char)ch);
-      lastWasCR = false;
     }
     
     if (tcpSendBufferLen >= TCP_SEND_BUFFER_SIZE) {

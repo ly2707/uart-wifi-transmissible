@@ -15,54 +15,87 @@ void handleWebServer() {
   if (!webServerEnabled) return;
   
   WiFiClient client = webServer.available();
-  if (client) {
-    // 读取Web客户端请求
-    String request = client.readStringUntil('\r');
-    client.flush();
-    
-    // 路由处理
-    if (request.indexOf("GET / ") >= 0) {
-      handleRootPage(client);
-    } else if (request.indexOf("GET /favicon") >= 0) {
-      client.println("HTTP/1.1 204 No Content");
-      client.println();
-    } else if (request.indexOf("GET /serial ") >= 0 || request.indexOf("GET /serial") >= 0) {
-      if (request.indexOf("GET /serial/data") >= 0) {
-        handleSerialDataAPI(client);
+  if (!client) return;
+  
+  // 读取Web客户端请求，设置超时
+  String request = "";
+  unsigned long startTime = millis();
+  while (client.connected() && (millis() - startTime < 1000)) {
+    if (client.available()) {
+      char c = client.read();
+      if (c == '\r' || c == '\n') {
+        if (request.length() > 0) break;
       } else {
-        handleSerialPage(client);
+        request += c;
       }
-    } else if (request.indexOf("POST /serial/send") >= 0) {
-      handleSerialSend(client, request);
-    } else if (request.indexOf("POST /serial/clear") >= 0) {
-      handleSerialClear(client);
-    } else if (request.indexOf("GET /logs") >= 0) {
-      handleLogsPage(client, request);
-    } else if (request.indexOf("GET /preview") >= 0) {
-      handlePreviewLog(client, request);
-    } else if (request.indexOf("GET /status ") >= 0) {
-      handleStatusPage(client);
-    } else if (request.indexOf("GET /client") >= 0) {
-      handleClientPage(client, request);
-    } else if (request.indexOf("POST /client/send") >= 0) {
-      handleClientSend(client, request);
-    } else if (request.indexOf("GET /config ") >= 0) {
-      handleConfigPage(client);
-    } else if (request.indexOf("POST /saveconfig") >= 0) {
-      handleSaveConfig(client);
-    } else if (request.indexOf("GET /download") >= 0) {
-      handleDownloadLog(client, request);
-    } else if (request.indexOf("GET /clear ") >= 0) {
-      handleClearLog(client);
-    } else if (request.indexOf("POST /power") >= 0) {
-      handlePowerControl(client, request);
-    } else {
-      handleNotFound(client);
     }
-    
-    delay(10);
-    client.stop();
+    delay(1);
   }
+  
+  if (request.length() == 0) {
+    client.stop();
+    return;
+  }
+  
+  // 路由处理
+  if (request.indexOf("GET / ") >= 0 || request.indexOf("GET / HTTP") >= 0) {
+    handleRootPage(client);
+  } else if (request.indexOf("GET /favicon") >= 0) {
+    client.println("HTTP/1.1 204 No Content");
+    client.println();
+  } else if (request.indexOf("GET /hotspot-detect.html") >= 0 || request.indexOf("GET /connecttest.txt") >= 0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.print("<!DOCTYPE html><html><head><script>window.location.href='http://192.168.1.1/';</script></head><body></body></html>");
+  } else if (request.indexOf("GET /generate_204") >= 0 || request.indexOf("GET /fwlink") >= 0) {
+    // Android/Windows Captive Portal
+    client.println("HTTP/1.1 204 No Content");
+    client.println();
+  } else if (request.indexOf("GET /ncsi.txt") >= 0) {
+    // Windows Captive Portal
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/plain");
+    client.println();
+    client.print("Microsoft Connect Test");
+  } else if (request.indexOf("GET /serial ") >= 0 || request.indexOf("GET /serial") >= 0) {
+    if (request.indexOf("GET /serial/data") >= 0) {
+      handleSerialDataAPI(client);
+    } else {
+      handleSerialPage(client);
+    }
+  } else if (request.indexOf("POST /serial/send") >= 0) {
+    handleSerialSend(client, request);
+  } else if (request.indexOf("POST /serial/clear") >= 0) {
+    handleSerialClear(client);
+  } else if (request.indexOf("GET /logs") >= 0) {
+    handleLogsPage(client, request);
+  } else if (request.indexOf("GET /preview") >= 0) {
+    handlePreviewLog(client, request);
+  } else if (request.indexOf("GET /status ") >= 0) {
+    handleStatusPage(client);
+  } else if (request.indexOf("GET /client") >= 0) {
+    handleClientPage(client, request);
+  } else if (request.indexOf("POST /client/send") >= 0) {
+    handleClientSend(client, request);
+  } else if (request.indexOf("GET /config ") >= 0) {
+    handleConfigPage(client);
+  } else if (request.indexOf("POST /saveconfig") >= 0) {
+    handleSaveConfig(client);
+  } else if (request.indexOf("GET /download") >= 0) {
+    handleDownloadLog(client, request);
+  } else if (request.indexOf("GET /clear ") >= 0) {
+    handleClearLog(client);
+  } else if (request.indexOf("GET /delete") >= 0) {
+    handleDeleteFile(client, request);
+  } else if (request.indexOf("POST /power") >= 0) {
+    handlePowerControl(client, request);
+  } else {
+    handleNotFound(client);
+  }
+    
+  delay(10);
+  client.stop();
 }
 
 void handleRootPage(WiFiClient client) {
@@ -178,6 +211,10 @@ void handleLogsPage(WiFiClient client, String request) {
   html += "</style></head><body>";
   html += "<div class='container'>";
   html += "<h1>📋 日志文件</h1>";
+  html += "<div style='margin:10px 0;'>";
+  html += "<a href='/logs?dir=' style='padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;'>服务器日志</a> ";
+  html += "<a href='/logs?dir=client' style='padding:8px 16px;background:#2196F3;color:white;text-decoration:none;border-radius:4px;'>客户端日志</a>";
+  html += "</div>";
   
   // 检查SD卡状态
   if (!sdCardReady) {
@@ -269,6 +306,7 @@ void handleLogsPage(WiFiClient client, String request) {
           html += "<div class='file-actions'>";
           html += "<a href='/preview?file=" + entryPath + "'>预览</a>";
           html += "<a href='/download?file=" + entryPath + "'>下载</a>";
+          html += "<a href='/delete?file=" + entryPath + "' onclick='return confirm(\"确定删除 " + entryName + "？\")'>删除</a>";
           html += "</div>";
           html += "<div class='file-size'>" + fileSize + "</div>";
           html += "</div>";
@@ -971,7 +1009,7 @@ void handleSerialPage(WiFiClient client) {
   html += ".header h1{color:#4CAF50;font-size:18px;}";
   html += ".header-info{color:#888;font-size:12px;}";
   html += ".serial-container{flex:1;display:flex;flex-direction:column;overflow:hidden;}";
-  html += ".serial-output{flex:1;background:#1a1a1a;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
+  html += ".serial-output{flex:1;background:#1a1a1a;color:#0f0;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
   html += ".serial-output::-webkit-scrollbar{width:10px;}";
   html += ".serial-output::-webkit-scrollbar-track{background:#2d2d2d;}";
   html += ".serial-output::-webkit-scrollbar-thumb{background:#555;border-radius:5px;}";
@@ -995,6 +1033,14 @@ void handleSerialPage(WiFiClient client) {
   html += "<div class='header'>";
   html += "<h1>🖥️ 串口监视器</h1>";
   html += "<div class='header-info'>波特率: " + String(uart2BaudRate) + " | 模式: " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "</div>";
+  html += "<select id='sourceSelect' onchange='changeSource()' style='background:#333;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
+  html += "<option value='server'>服务器全局</option>";
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      html += "<option value='client_" + String(i) + "'>客户端 " + String(i) + "</option>";
+    }
+  }
+  html += "</select>";
   html += "</div>";
   html += "<div class='serial-container'>";
   html += "<textarea class='serial-output' id='serialOutput' readonly></textarea>";
@@ -1012,26 +1058,36 @@ void handleSerialPage(WiFiClient client) {
   html += "<script>";
   html += "var lastDataLen = 0;";
   html += "var lastTimestamp = 0;";
+  html += "var currentSource = 'server';";
+  html += "var serialData = {server: '', client_0: '', client_1: '', client_2: '', client_3: '', client_4: ''};";
+  html += "function changeSource(){";
+  html += "  currentSource = document.getElementById('sourceSelect').value;";
+  html += "  document.getElementById('serialOutput').value = serialData[currentSource] || '';";
+  html += "  document.getElementById('serialOutput').scrollTop = document.getElementById('serialOutput').scrollHeight;";
+  html += "}";
   html += "function fetchSerialData(){";
   html += "  var xhr = new XMLHttpRequest();";
-  html += "  xhr.open('GET', '/serial/data', true);";
+  html += "  xhr.open('GET', '/serial/data?source=' + currentSource, true);";
   html += "  xhr.onreadystatechange = function(){";
   html += "    if(xhr.readyState == 4 && xhr.status == 200){";
   html += "      var data = xhr.responseText;";
   html += "      if(data.length > 0){";
-  html += "        var output = document.getElementById('serialOutput');";
-  html += "        var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
-  html += "        output.value += data;";
-  html += "        if(wasAtBottom){";
-  html += "          output.scrollTop = output.scrollHeight;";
+  html += "        serialData[currentSource] += data;";
+  html += "        if(serialData[currentSource].length > 50000){";
+  html += "          serialData[currentSource] = serialData[currentSource].substring(serialData[currentSource].length - 40000);";
   html += "        }";
-  html += "        if(output.value.length > 50000){";
-  html += "          output.value = output.value.substring(output.value.length - 40000);";
+  html += "        if(currentSource === 'server'){";
+  html += "          var output = document.getElementById('serialOutput');";
+  html += "          var wasAtBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50;";
+  html += "          output.value = serialData[currentSource];";
+  html += "          if(wasAtBottom){";
+  html += "            output.scrollTop = output.scrollHeight;";
+  html += "          }";
   html += "        }";
   html += "      }";
   html += "      var now = new Date();";
   html += "      document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();";
-  html += "      document.getElementById('bufferStatus').textContent = '缓冲区: ' + output.value.length + ' 字符';";
+  html += "      document.getElementById('bufferStatus').textContent = '缓冲区: ' + (serialData[currentSource] || '').length + ' 字符';";
   html += "    }";
   html += "  };";
   html += "  xhr.send();";
@@ -1074,11 +1130,18 @@ void handleSerialDataAPI(WiFiClient client) {
   client.println();
   
   noInterrupts();
-  String dataToSend = serialDisplayBuffer;
+  String response = serialDisplayBuffer;
   serialDisplayBuffer = "";
+  
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
+      response += clientSerialData[i];
+      clientSerialData[i] = "";
+    }
+  }
   interrupts();
   
-  client.print(dataToSend);
+  client.print(response);
 }
 
 void handleSerialSend(WiFiClient client, String request) {
@@ -1124,4 +1187,38 @@ void appendToSerialBuffer(const char* str) {
 // 处理串口数据请求（兼容旧接口）
 void handleSerialData(WiFiClient client) {
   handleSerialPage(client);
+}
+
+void handleDeleteFile(WiFiClient client, String request) {
+  int fileStart = request.indexOf("file=") + 5;
+  int fileEnd = request.indexOf(" ", fileStart);
+  if (fileEnd == -1) fileEnd = request.length();
+  String filePath = request.substring(fileStart, fileEnd);
+  filePath = urlDecode(filePath);
+  
+  if (filePath.indexOf("..") != -1 || filePath.indexOf("/server/") != 0) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  if (SD.exists(filePath)) {
+    if (SD.remove(filePath)) {
+      client.println("HTTP/1.1 302 Found");
+      client.println("Location: /logs");
+      client.println();
+    } else {
+      client.println("HTTP/1.1 500 Internal Server Error");
+      client.println("Content-Type: text/html");
+      client.println();
+      client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>删除失败</h1><a href='/logs'>返回日志列表</a></body></html>");
+    }
+  } else {
+    client.println("HTTP/1.1 404 Not Found");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>文件不存在</h1><a href='/logs'>返回日志列表</a></body></html>");
+  }
 }

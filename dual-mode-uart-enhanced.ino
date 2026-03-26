@@ -241,6 +241,7 @@ void handleClearLog(WiFiClient client);
 void handleSaveConfig(WiFiClient client);
 void handleClientPage(WiFiClient client, String request);
 void handleClientSend(WiFiClient client, String request);
+void handleDeleteFile(WiFiClient client, String request);
 void handleNotFound(WiFiClient client);
 void handleSerialPage(WiFiClient client);
 void handleSerialDataAPI(WiFiClient client);
@@ -393,6 +394,8 @@ void setup() {
 
 // ==================== 主循环 ====================
 void loop() {
+  yield();
+  
   // 处理按键
   handleButton();
   
@@ -415,7 +418,7 @@ void loop() {
   handleUSBSerial();
   
   // ========== UART2透传 ==========
-  handleHighSpeedUART();  // UART2 RX → 调试串口 + TCP
+  handleHighSpeedUARTWithWebBuffer();  // UART2 RX → 调试串口 + TCP + Web缓冲区
   
   // 处理Web服务器（日志查看）
   handleWebServer();
@@ -434,4 +437,6 @@ void loop() {
   
   // 更新LED状态
   updateLEDStatus();
+  
+  yield();
 }
