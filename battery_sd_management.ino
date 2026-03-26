@@ -141,22 +141,25 @@ String sanitizeFilename(String input) {
 
 void saveDataToSD(String data, String clientId, bool isServer) {
   if (!sdCardReady) {
-    if (isServer) {
-      Serial.println("? SD card unavailable, data not saved: " + data);
-    }
     return;
   }
   
-  // Sanitize clientId for safe filename
-  String safeClientId = sanitizeFilename(clientId);
+  char path[128];
+  char safeClientId[32];
   
-  String path;
+  clientId.toCharArray(safeClientId, sizeof(safeClientId));
+  sanitizeFilenameInPlace(safeClientId);
+  
   if (isServer) {
-    path = "/server/" + safeClientId + "/" + logFileName + "_" + safeClientId + "_" + getDateString() + ".txt";
-    createDirectory("/server/" + safeClientId);
+    snprintf(path, sizeof(path), "/server/%s/%s_%s_%s.txt", 
+             safeClientId, logFileName.c_str(), safeClientId, getDateString().c_str());
+    createDirectory("/server");
+    createDirectory(("/server/" + String(safeClientId)).c_str());
   } else {
-    path = "/client/" + safeClientId + "/" + logFileName + "_" + safeClientId + "_" + getDateString() + ".txt";
-    createDirectory("/client/" + safeClientId);
+    snprintf(path, sizeof(path), "/client/%s/%s_%s_%s.txt", 
+             safeClientId, logFileName.c_str(), safeClientId, getDateString().c_str());
+    createDirectory("/client");
+    createDirectory(("/client/" + String(safeClientId)).c_str());
   }
   
   File file = SD.open(path, FILE_APPEND);
@@ -168,9 +171,22 @@ void saveDataToSD(String data, String clientId, bool isServer) {
   } else {
     sdCardError = true;
     sdCardReady = false;
-    if (isServer) {
-      Serial.println("? Cannot write to SD card: " + path);
-      Serial.println("? SD card may have been removed");
+  }
+}
+
+void sanitizeFilenameInPlace(char* str) {
+  int j = 0;
+  for (int i = 0; str[i]; i++) {
+    char c = str[i];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+        (c >= '0' && c <= '9') || c == '_' || c == '-') {
+      str[j++] = c;
+    } else if (c == ' ') {
+      str[j++] = '_';
     }
+  }
+  str[j] = '\0';
+  if (j == 0) {
+    strcpy(str, "UNKNOWN");
   }
 }

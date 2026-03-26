@@ -1132,25 +1132,24 @@ void handleSerialDataAPI(WiFiClient client) {
   client.println("Cache-Control: no-cache, no-store, must-revalidate");
   client.println();
   
-  String response = "";
-  
   noInterrupts();
   
-  response = serialDisplayBuffer;
+  client.print(serialDisplayBuffer);
   serialDisplayBuffer = "";
   
   if (currentMode == MODE_SERVER) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
-        response += "[客户端" + String(i) + "] " + clientSerialData[i];
+        client.print("[客户端");
+        client.print(i);
+        client.print("] ");
+        client.print(clientSerialData[i]);
         clientSerialData[i] = "";
       }
     }
   }
   
   interrupts();
-  
-  client.print(response);
 }
 
 void handleSerialSend(WiFiClient client, String request) {
