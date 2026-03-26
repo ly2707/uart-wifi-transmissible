@@ -235,6 +235,8 @@ void handleLogsPage(WiFiClient client, String request) {
       if (dirParam.indexOf("..") == -1) {
         if (dirParam == "client") {
           currentDir = "/client";
+        } else if (dirParam == "server") {
+          currentDir = "/server/SERVER";
         } else if (dirParam.length() > 0) {
           currentDir = "/server/" + dirParam;
         }
