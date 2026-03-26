@@ -257,7 +257,7 @@ void runServerMode() {
                 logEntry += i;
                 logEntry += "] ";
                 logEntry += clientLineBuffer[i];
-                saveDataToSD(logEntry, "SERVER", true);
+                saveDataToSD(logEntry, "SERVER", false);  // false = 保存到 /client/ 目录
               }
             }
             clientLineBuffer[i] = "";
