@@ -288,15 +288,24 @@ void printHelp();
 
 // ==================== 初始化函数 ====================
 void setup() {
+  // 冷启动延迟，等待电源稳定
+  delay(500);
+  
   // 初始化调试串口（优先）
   Serial.begin(115200);
-  delay(100);
+  delay(200);
   
   Serial.println("\n========================================");
   Serial.println("  ESP32-S3 UART2透传系统");
   Serial.println("  版本: " + String(FIRMWARE_VERSION));
   Serial.println("  功能: 调试串口 ↔ UART2 双向透传");
   Serial.println("========================================");
+  
+  // 检查是否是冷启动
+  if (esp_reset_reason() == ESP_RST_POWERON) {
+    Serial.println("冷启动，额外等待电源稳定...");
+    delay(1000);
+  }
   
   // 初始化EEPROM（先加载配置，再初始化UART）
   EEPROM.begin(EEPROM_SIZE);
@@ -421,8 +430,8 @@ void loop() {
   // ========== UART2透传 ==========
   handleHighSpeedUARTWithWebBuffer();  // UART2 RX → 调试串口 + TCP + Web缓冲区
   
-  // 处理Web服务器（日志查看）(暂时禁用以测试稳定性)
-  // handleWebServer();
+  // 处理Web服务器（日志查看）
+  handleWebServer();
   
   // 根据模式执行不同逻辑（低功耗功能已禁用）
   // if (!lowPowerMode) {
@@ -436,8 +445,8 @@ void loop() {
   //   handleLowPowerMode();
   // }
   
-  // 更新LED状态 (暂时禁用以测试稳定性)
-  // updateLEDStatus();
+  // 更新LED状态
+  updateLEDStatus();
   
   yield();
 }

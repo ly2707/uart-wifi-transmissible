@@ -166,7 +166,14 @@ void runClientMode() {
 void initServerMode() {
   Serial.println("Initializing server mode...");
   
+  // WiFi启动前等待电源稳定
+  delay(200);
+  
   WiFi.mode(WIFI_AP);
+  
+  // 降低WiFi发射功率以减少启动电流峰值
+  WiFi.setTxPower(WIFI_POWER_8dBm);
+  
   IPAddress localIP(192, 168, 1, 1);
   IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
