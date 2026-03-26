@@ -191,6 +191,7 @@ void initServerMode() {
       serverClients[i].stop();
     }
     clientSerialData[i] = "";
+    clientLineBuffer[i] = "";
   }
 }
 
@@ -226,8 +227,6 @@ void runServerMode() {
       newClient.stop();
     }
   }
-  
-  static String clientLineBuffer[MAX_CLIENTS];
   
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected()) {

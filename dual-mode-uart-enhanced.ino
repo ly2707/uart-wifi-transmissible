@@ -182,6 +182,7 @@ bool debugMode = true;             // 默认开启debug模式
 #define MAX_CLIENTS  5
 WiFiClient serverClients[MAX_CLIENTS];
 String clientSerialData[MAX_CLIENTS];  // 存储每个客户端的实时串口数据
+String clientLineBuffer[MAX_CLIENTS];  // 客户端日志行缓冲
 
 // SD卡状态
 bool sdCardReady = false;
