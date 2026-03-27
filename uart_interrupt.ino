@@ -62,6 +62,9 @@ void uartRxTask(void *arg) {
             // 写入Serial
             Serial.write((char*)filteredBuf, filteredLen);
             
+            // 写入Web串口显示缓冲区
+            appendToSerialBuffer((char*)filteredBuf, filteredLen);
+            
             // 同时写入TCP缓冲区
             if (currentMode == MODE_SERVER || (currentMode == MODE_CLIENT && tcpConnected)) {
               for (int i = 0; i < filteredLen; i++) {

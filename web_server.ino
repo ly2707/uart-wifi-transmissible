@@ -1270,6 +1270,15 @@ void appendToSerialBuffer(const char* str) {
   }
 }
 
+void appendToSerialBuffer(const char* str, int len) {
+  for (int i = 0; i < len; i++) {
+    serialDisplayBuffer += str[i];
+  }
+  if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
+    serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
+  }
+}
+
 // 处理串口数据请求（兼容旧接口）
 void handleSerialData(WiFiClient client) {
   handleSerialPage(client);

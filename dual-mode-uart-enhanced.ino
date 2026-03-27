@@ -256,6 +256,7 @@ void handleSerialClear(WiFiClient client);
 void handlePowerControl(WiFiClient client, String request);
 void appendToSerialBuffer(char c);
 void appendToSerialBuffer(const char* str);
+void appendToSerialBuffer(const char* str, int len);
 String formatFileSize(unsigned long bytes);
 String urlDecode(String input);
 
