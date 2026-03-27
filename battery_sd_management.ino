@@ -1,4 +1,40 @@
 // ==================== Battery Monitor ====================
+
+// 过滤ANSI转义序列
+String filterAnsiEscape(String input) {
+  if (input.length() == 0) return input;
+  
+  String output = "";
+  int len = input.length();
+  
+  for (int i = 0; i < len; i++) {
+    if (input[i] == 0x1B) {
+      int j = i + 1;
+      if (j < len && input[j] == '[') {
+        j++;
+        while (j < len) {
+          char c = input[j];
+          if ((c >= '0' && c <= '9') || c == ';' || c == '?' || c == '>' || c == '<' || c == '=') {
+            j++;
+          } else {
+            break;
+          }
+        }
+        if (j < len) {
+          char c = input[j];
+          if (c >= 0x40 && c <= 0x7E) {
+            j++;
+          }
+        }
+        i = j - 1;
+        continue;
+      }
+    }
+    output += input[i];
+  }
+  return output;
+}
+
 void checkBattery() {
   int adcValue = analogRead(BATTERY_ADC_PIN);
   batteryVoltage = (adcValue / 4095.0) * 3.3 * 2;
@@ -79,8 +115,7 @@ void initSDCard() {
     }
 
     if (currentMode == MODE_CLIENT) {
-      createDirectory("/client");
-      createDirectory("/client/" + sanitizeFilename(client_id));
+      createDirectory("/client_local");
     } else {
       createDirectory("/server");
       createDirectory("/server/system");
@@ -155,11 +190,10 @@ void saveDataToSD(String data, String clientId, bool isServer) {
     createDirectory("/server");
     createDirectory(clientDir);
   } else {
-    snprintf(clientDir, sizeof(clientDir), "/client/%s", safeClientId);
+    snprintf(clientDir, sizeof(clientDir), "/client_local");
     snprintf(path, sizeof(path), "%s/%s_%s.txt",
              clientDir, logFileName.c_str(), getDateString().c_str());
-    createDirectory("/client");
-    createDirectory(clientDir);
+    createDirectory("/client_local");
   }
 
   File file = SD.open(path, FILE_APPEND);
@@ -207,5 +241,77 @@ void sanitizeFilenameInPlace(char* str) {
   str[j] = '\0';
   if (j == 0) {
     strcpy(str, "UNKNOWN");
+  }
+}
+
+// ==================== SD异步写入队列 ====================
+#define SD_WRITE_QUEUE_SIZE 256
+#define SD_WRITE_BATCH_SIZE 32
+#define SD_WRITE_INTERVAL_MS 1000  // 每1秒批量写入一次
+
+typedef struct {
+  String data;
+  String clientId;
+  bool isServer;
+} SDLogEntry;
+
+SDLogEntry sdWriteQueue[SD_WRITE_QUEUE_SIZE];
+int sdQueueHead = 0;
+int sdQueueTail = 0;
+int sdQueueCount = 0;
+unsigned long lastSDWriteTime = 0;
+
+bool enqueueSDLog(String data, String clientId, bool isServer) {
+  if (!sdCardReady || data.length() == 0) return false;
+  if (sdQueueCount >= SD_WRITE_QUEUE_SIZE) return false;
+  
+  // 过滤ANSI转义序列后再保存
+  String filteredData = filterAnsiEscape(data);
+  sdWriteQueue[sdQueueHead].data = filteredData;
+  sdWriteQueue[sdQueueHead].clientId = clientId;
+  sdWriteQueue[sdQueueHead].isServer = isServer;
+  sdQueueHead = (sdQueueHead + 1) % SD_WRITE_QUEUE_SIZE;
+  sdQueueCount++;
+  return true;
+}
+
+void processSDWriteQueue() {
+  if (!sdCardReady) return;
+  if (sdQueueCount == 0) return;
+  
+  unsigned long now = millis();
+  if (now - lastSDWriteTime < SD_WRITE_INTERVAL_MS && sdQueueCount < SD_WRITE_BATCH_SIZE) return;
+  
+  lastSDWriteTime = now;
+  
+  int batchSize = min(sdQueueCount, SD_WRITE_BATCH_SIZE);
+  
+  for (int i = 0; i < batchSize; i++) {
+    SDLogEntry entry = sdWriteQueue[sdQueueTail];
+    sdQueueTail = (sdQueueTail + 1) % SD_WRITE_QUEUE_SIZE;
+    sdQueueCount--;
+    
+    char path[128];
+    char safeClientId[32];
+    char clientDir[64];
+    
+    entry.clientId.toCharArray(safeClientId, sizeof(safeClientId));
+    sanitizeFilenameInPlace(safeClientId);
+    
+    if (entry.isServer) {
+      snprintf(clientDir, sizeof(clientDir), "/server/%s", safeClientId);
+      snprintf(path, sizeof(path), "%s/%s_%s.txt",
+               clientDir, logFileName.c_str(), getDateString().c_str());
+    } else {
+      snprintf(clientDir, sizeof(clientDir), "/client_local");
+      snprintf(path, sizeof(path), "%s/%s_%s.txt",
+               clientDir, logFileName.c_str(), getDateString().c_str());
+    }
+    
+    File file = SD.open(path, FILE_APPEND);
+    if (file) {
+      file.println(entry.data);
+      file.close();
+    }
   }
 }
