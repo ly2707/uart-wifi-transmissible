@@ -1,4 +1,5 @@
 // ==================== Web服务器和页面处理 ====================
+
 void initWebServer() {
   if (webServerEnabled && (wifiConnected || currentMode == MODE_SERVER)) {
     webServer.begin();
@@ -504,7 +505,8 @@ void handleClientPage(WiFiClient client, String request) {
     client.println();
     
     if (clientIdx >= 0 && clientIdx < MAX_CLIENTS) {
-      client.print(clientSerialData[clientIdx]);
+      String filteredData = filterAnsiEscape(clientSerialData[clientIdx]);
+      client.print(filteredData);
     }
     return;
   }
@@ -529,7 +531,7 @@ void handleClientPage(WiFiClient client, String request) {
   html += ".header h1{color:#4CAF50;font-size:18px;}";
   html += ".header-info{color:#888;font-size:12px;margin-top:5px;}";
   html += ".serial-container{flex:1;display:flex;flex-direction:column;overflow:hidden;}";
-  html += ".serial-output{flex:1;background:#1a1a1a;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
+  html += ".serial-output{flex:1;background:#1a1a1a;color:#0f0;padding:12px;overflow-y:auto;font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap;border:none;resize:none;}";
   html += ".serial-output::-webkit-scrollbar{width:10px;}";
   html += ".serial-output::-webkit-scrollbar-track{background:#2d2d2d;}";
   html += ".serial-output::-webkit-scrollbar-thumb{background:#555;border-radius:5px;}";
@@ -551,7 +553,8 @@ void handleClientPage(WiFiClient client, String request) {
   html += "<div class='header-info'>IP: " + serverClients[clientIdx].remoteIP().toString() + " | 波特率: " + String(uart2BaudRate) + "</div>";
   html += "</div>";
   html += "<div class='serial-container'>";
-  html += "<textarea class='serial-output' id='serialData' readonly>" + clientSerialData[clientIdx] + "</textarea>";
+  String initData = filterAnsiEscape(clientSerialData[clientIdx]);
+  html += "<textarea class='serial-output' id='serialData' readonly>" + initData + "</textarea>";
   html += "</div>";
   html += "<div class='input-area'>";
   html += "<input type='text' id='serialInput' placeholder='输入命令...' autocomplete='off'>";
@@ -1208,16 +1211,17 @@ void handleSerialDataAPI(WiFiClient client) {
   client.println("Cache-Control: no-cache, no-store, must-revalidate");
   client.println();
   
-  String response = serialDisplayBuffer;
+  String response = filterAnsiEscape(serialDisplayBuffer);
   serialDisplayBuffer = "";
   
   if (currentMode == MODE_SERVER) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
       if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
+        String filtered = filterAnsiEscape(clientSerialData[i]);
         response += "[客户端";
         response += i;
         response += "] ";
-        response += clientSerialData[i];
+        response += filtered;
         clientSerialData[i] = "";
       }
     }
