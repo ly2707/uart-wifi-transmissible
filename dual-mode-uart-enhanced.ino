@@ -227,6 +227,9 @@ void powerOffSDCard();
 void powerOnSDCard();
 void createDirectory(String path);
 void saveDataToSD(String data, String clientId, bool isServer);
+void saveServerSystemLog(String data);
+bool enqueueSDLog(String data, String clientId, bool isServer);
+void processSDWriteQueue();
 void checkSDCardStatus();
 
 // Web服务器
@@ -275,8 +278,10 @@ int getConnectedClientCount();
 void handleUART2ToDebug();
 void handleHighSpeedUART();
 void handleHighSpeedUARTWithWebBuffer();
+void initUARTInterrupt(bool reinstall = false);
 void handleUSBSerial();
 String formatClientData(String data);
+String filterAnsiEscape(String input);
 
 // 指令解析
 void handleCommand(String command);
@@ -314,9 +319,7 @@ void setup() {
   loadConfigFromEEPROM();
   
   // ========== 初始化UART2 ==========
-  Serial2.begin(uart2BaudRate, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);
-  
-  // 初始化UART中断（中断驱动高速透传）
+  // 使用DMA驱动，不调用Serial2.begin避免冲突
   initUARTInterrupt();
   
   if (debugMode) {
@@ -326,10 +329,11 @@ void setup() {
     Serial.print(UART2_RX_PIN);
     Serial.print(" TX=");
     Serial.println(UART2_TX_PIN);
-    Serial.println("✓ UART中断模式已启用");
+    Serial.println("✓ UART DMA模式已启用");
     
     // 测试UART2发送
-    Serial2.println("UART2 Test Message");
+    const char* testMsg = "UART2 Test Message\r\n";
+    uart_write_bytes(UART_NUM_2, testMsg, strlen(testMsg));
     Serial.println("✓ UART2测试消息已发送");
   }
   
@@ -439,8 +443,10 @@ void loop() {
   // if (!lowPowerMode) {
     if (currentMode == MODE_CLIENT) {
       runClientMode();
+      processSDWriteQueue();
     } else {
       runServerMode();
+      processSDWriteQueue();
     }
   // } else {
   //   // 低功耗模式处理

@@ -9,21 +9,46 @@ void handleUART2ToDebug() {
 }
 
 void handleUSBSerial() {
+  static String inputBuffer = "";
+  
   while (Serial.available()) {
     char incoming = Serial.read();
     
+    // 使用DMA发送
+    uart_write_bytes(UART_NUM_2, &incoming, 1);
+    
+    // 客户端模式：记录发送的日志到SD卡
+    if (currentMode == MODE_CLIENT && logToSD && sdCardReady) {
+      if (incoming == '\n') {
+        if (inputBuffer.length() > 1) {
+          enqueueSDLog(inputBuffer, client_id, false);
+        }
+        inputBuffer = "";
+      } else if (incoming != '\r') {
+        inputBuffer += incoming;
+      }
+    }
+    
+    // 收集字符用于AT命令检查
+    if (!(currentMode == MODE_CLIENT && logToSD && sdCardReady)) {
+      inputBuffer += incoming;
+    }
+    
+    // 检查是否是换行或回车（命令结束）
     if (incoming == '\n' || incoming == '\r') {
-      if (usbRxBuffer.length() > 0) {
-        String command = usbRxBuffer;
-        usbRxBuffer = "";
+      String command = inputBuffer;
+      command.trim();
+      
+      // 检查是否是AT命令
+      if (command.startsWith("AT") || command.startsWith("at")) {
         handleCommand(command);
       }
-    } else if (incoming >= 32 || incoming == '\t' || incoming == 27) {
-      usbRxBuffer += incoming;
-      if (usbRxBuffer.length() > UART_BUFFER_SIZE) {
-        usbRxBuffer = "";
-        Serial.println("X Input buffer overflow");
-      }
+      inputBuffer = "";
+    }
+    
+    // 限制缓冲区大小
+    if (inputBuffer.length() > UART_BUFFER_SIZE) {
+      inputBuffer = "";
     }
   }
 }
@@ -65,8 +90,7 @@ void handleCommand(String command) {
     unsigned long newBaud = baudStr.toInt();
     if (newBaud >= 9600 && newBaud <= 921600) {
       uart2BaudRate = newBaud;
-      Serial2.begin(uart2BaudRate, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);
-      initUARTInterrupt();
+      initUARTInterrupt(true);
       saveConfigToEEPROM();
       Serial.println("OK UART2 baud rate set to: " + String(uart2BaudRate));
     } else {
@@ -134,7 +158,8 @@ void handleCommand(String command) {
     }
   } else {
     // Unknown command, send to UART2
-    Serial2.println(command);
+    String sendData = command + "\r\n";
+    uart_write_bytes(UART_NUM_2, sendData.c_str(), sendData.length());
     Serial.println("[Sent] " + command);
   }
 }

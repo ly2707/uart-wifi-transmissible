@@ -151,19 +151,21 @@ void runClientMode() {
     uint8_t buf[256];
     size_t readBytes = tcpClient.read(buf, toRead);
 
-    for (size_t i = 0; i < readBytes; i++) {
-      Serial2.write(buf[i]);
-
-      char c = buf[i];
-      if (c == '\n') {
-        if (logToSD && sdCardReady) {
-          if (tcpLineBuffer.length() > 0) {
-            saveDataToSD(tcpLineBuffer, client_id, false);
-            tcpLineBuffer = "";
+    // 使用DMA发送
+    uart_write_bytes(UART_NUM_2, (const char *)buf, readBytes);
+    
+    // 记录接收到的日志
+    if (logToSD && sdCardReady) {
+      for (size_t j = 0; j < readBytes; j++) {
+        char c = buf[j];
+        if (c == '\n') {
+          if (tcpLineBuffer.length() > 1) {
+            enqueueSDLog(tcpLineBuffer, client_id, false);
           }
+          tcpLineBuffer = "";
+        } else if (c != '\r') {
+          tcpLineBuffer += c;
         }
-      } else if (c != '\r') {
-        tcpLineBuffer += c;
       }
     }
   }
@@ -272,18 +274,19 @@ void runServerMode() {
         uint8_t buf[256];
         size_t readBytes = serverClients[i].read(buf, toRead);
 
-        for (size_t j = 0; j < readBytes; j++) {
-          Serial2.write(buf[j]);
+        // 使用DMA发送
+        uart_write_bytes(UART_NUM_2, (const char *)buf, readBytes);
 
+        // 记录日志数据用于Web显示
+        for (size_t j = 0; j < readBytes; j++) {
           char c = buf[j];
           if (c == '\n') {
             clientSerialData[i] += '\n';
             clientLineBuffer[i] += '\n';
-
             if (clientLineBuffer[i].length() > 1) {
               if (logToSD && sdCardReady) {
                 String clientId = serverClients[i].remoteIP().toString();
-                saveDataToSD(clientLineBuffer[i], clientId, true);
+                enqueueSDLog(clientLineBuffer[i], clientId, true);
               }
             }
             clientLineBuffer[i] = "";
