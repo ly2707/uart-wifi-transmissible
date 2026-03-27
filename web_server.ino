@@ -86,10 +86,10 @@ void handleWebServer() {
     handleDownloadLog(client, request);
   } else if (request.indexOf("GET /clear ") >= 0) {
     handleClearLog(client);
-  } else if (request.indexOf("GET /delete") >= 0) {
-    handleDeleteFile(client, request);
   } else if (request.indexOf("GET /deletedir") >= 0) {
     handleDeleteDirectory(client, request);
+  } else if (request.indexOf("GET /delete?file=") >= 0) {
+    handleDeleteFile(client, request);
   } else if (request.indexOf("POST /power") >= 0) {
     handlePowerControl(client, request);
   } else {
@@ -204,9 +204,9 @@ void handleLogsPage(WiFiClient client, String request) {
   html += ".container{max-width:800px;padding:15px;}";
   html += "}";
   html += "@media screen and (max-width: 480px) {";
-  html += ".file-item{flex-direction:column;align-items:flex-start;}";
-  html += ".file-actions{margin-left:0;margin-top:8px;}";
-  html += ".file-size{margin-left:0;margin-top:4px;}";
+  html += ".file-item{flex-direction:row;align-items:center;}";
+  html += ".file-actions{margin-left:auto;}";
+  html += ".file-size{margin-left:10px;}";
   html += ".container{max-width:95%;padding:10px;}";
   html += "h1{font-size:16px;}";
   html += "h2{font-size:14px;}";
@@ -226,25 +226,41 @@ void handleLogsPage(WiFiClient client, String request) {
     html += "</div>";
   } else {
     // 解析目录参数
-    String currentDir = "/server/SERVER";
+    String currentDir = "/server";
     int dirIndex = request.indexOf("dir=");
     if (dirIndex > 0) {
       int dirEnd = request.indexOf(" ", dirIndex);
       if (dirEnd < 0) dirEnd = request.length();
       String dirParam = request.substring(dirIndex + 4, dirEnd);
+      // 规范化：移除可能存在的前导斜杠
+      while (dirParam.startsWith("/")) {
+        dirParam = dirParam.substring(1);
+      }
+      // 规范化：移除可能存在的双斜杠
+      while (dirParam.indexOf("//") >= 0) {
+        dirParam.replace("//", "/");
+      }
       // 安全检查：防止路径遍历攻击
       if (dirParam.indexOf("..") == -1) {
         if (dirParam == "client") {
           currentDir = "/client";
         } else if (dirParam == "server") {
-          currentDir = "/server/SERVER";
+          currentDir = "/server";
         } else if (dirParam.startsWith("client/")) {
           currentDir = "/" + dirParam;
         } else if (dirParam.startsWith("server/")) {
           currentDir = "/" + dirParam;
         } else if (dirParam.length() > 0) {
-          // 其他情况，假设是客户端子目录
-          currentDir = "/client/" + dirParam;
+          // 判断是服务器还是客户端的子目录，需要从父路径判断
+          // 默认先尝试服务器目录
+          if (SD.exists("/server/" + dirParam)) {
+            currentDir = "/server/" + dirParam;
+          } else if (SD.exists("/client/" + dirParam)) {
+            currentDir = "/client/" + dirParam;
+          } else {
+            // 如果都不存在，默认为客户端目录
+            currentDir = "/client/" + dirParam;
+          }
         }
       }
     }
@@ -254,9 +270,9 @@ void handleLogsPage(WiFiClient client, String request) {
     html += "<a href='/logs'>根目录</a>";
     if (currentDir.startsWith("/server")) {
       html += " → <a href='/logs?dir=server'>服务器</a>";
-      if (currentDir != "/server" && currentDir != "/server/SERVER") {
+      if (currentDir != "/server") {
         String subPath = currentDir.substring(8); // 去掉 "/server" 前缀
-        if (subPath != "SERVER") {
+        if (subPath.length() > 0 && subPath != "/") {
           html += " → " + subPath;
         }
       }
@@ -264,6 +280,10 @@ void handleLogsPage(WiFiClient client, String request) {
       html += " → <a href='/logs?dir=client'>客户端</a>";
       String subPath = currentDir.substring(7); // 去掉 "/client" 前缀
       if (subPath.length() > 0 && subPath != "/") {
+        // 移除前导斜杠
+        if (subPath.startsWith("/")) {
+          subPath = subPath.substring(1);
+        }
         html += " → " + subPath;
       }
     }
@@ -281,7 +301,7 @@ void handleLogsPage(WiFiClient client, String request) {
       bool hasFiles = false;
       
       // 显示返回上级目录链接
-      if (currentDir != "/server/SERVER" && currentDir != "/client") {
+      if (currentDir != "/server" && currentDir != "/client") {
         String parentDir = currentDir.substring(0, currentDir.lastIndexOf('/'));
         String parentLink = "";
         if (parentDir == "/server") {
@@ -305,7 +325,17 @@ void handleLogsPage(WiFiClient client, String request) {
         if (!entry) break;
         hasFiles = true;
         String entryName = entry.name();
-        String entryPath = currentDir + "/" + entryName;
+        // 规范化路径：避免产生双斜杠
+        String entryPath;
+        if (currentDir.endsWith("/")) {
+          entryPath = currentDir + entryName;
+        } else {
+          entryPath = currentDir + "/" + entryName;
+        }
+        // 移除路径中可能存在的双斜杠
+        while (entryPath.indexOf("//") >= 0) {
+          entryPath.replace("//", "/");
+        }
         String entryUrlPath;
         if (currentDir.startsWith("/server")) {
           entryUrlPath = entryPath.substring(8); // 去掉 "/server" 前缀
@@ -932,8 +962,22 @@ void handlePreviewLog(WiFiClient client, String request) {
   // URL解码
   filePath = urlDecode(filePath);
   
+  // 规范化路径：移除多余的斜杠
+  while (filePath.indexOf("//") >= 0) {
+    filePath.replace("//", "/");
+  }
+  
   // 安全检查：防止路径遍历攻击
   if (filePath.indexOf("..") != -1) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><p>非法的文件路径</p><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  // 允许访问 /server/ 和 /client/ 路径下的文件
+  if (!filePath.startsWith("/server/") && !filePath.startsWith("/client/")) {
     client.println("HTTP/1.1 403 Forbidden");
     client.println("Content-Type: text/html");
     client.println();
@@ -1234,7 +1278,22 @@ void handleDeleteFile(WiFiClient client, String request) {
   String filePath = request.substring(fileStart, fileEnd);
   filePath = urlDecode(filePath);
   
-  if (filePath.indexOf("..") != -1 || filePath.indexOf("/server/") != 0) {
+  // 规范化路径：移除多余的斜杠
+  while (filePath.indexOf("//") >= 0) {
+    filePath.replace("//", "/");
+  }
+  
+  // 安全检查：防止路径遍历攻击
+  if (filePath.indexOf("..") != -1) {
+    client.println("HTTP/1.1 403 Forbidden");
+    client.println("Content-Type: text/html");
+    client.println();
+    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>403 - 禁止访问</h1><a href='/logs'>返回日志列表</a></body></html>");
+    return;
+  }
+  
+  // 允许删除 /server/ 和 /client/ 路径下的文件
+  if (!filePath.startsWith("/server/") && !filePath.startsWith("/client/")) {
     client.println("HTTP/1.1 403 Forbidden");
     client.println("Content-Type: text/html");
     client.println();
@@ -1268,6 +1327,12 @@ void handleDeleteDirectory(WiFiClient client, String request) {
   String dirPath = request.substring(dirStart, dirEnd);
   dirPath = urlDecode(dirPath);
   
+  // 规范化路径：移除多余的斜杠
+  while (dirPath.indexOf("//") >= 0) {
+    dirPath.replace("//", "/");
+  }
+  
+  // 安全检查：防止路径遍历攻击
   if (dirPath.indexOf("..") != -1) {
     client.println("HTTP/1.1 403 Forbidden");
     client.println("Content-Type: text/html");

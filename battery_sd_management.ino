@@ -2,7 +2,7 @@
 void checkBattery() {
   int adcValue = analogRead(BATTERY_ADC_PIN);
   batteryVoltage = (adcValue / 4095.0) * 3.3 * 2;
-  
+
   if (batteryVoltage < BATTERY_LOW_VOLTAGE && batteryVoltage > 2.0) {
     if (!lowBattery) {
       lowBattery = true;
@@ -22,7 +22,7 @@ void checkBattery() {
 // ==================== SD Card Status Check ====================
 void checkSDCardStatus() {
   static bool lastSDCardReady = sdCardReady;
-  
+
   if (sdCardReady) {
     File root = SD.open("/");
     if (!root) {
@@ -58,7 +58,7 @@ void checkSDCardStatus() {
       }
     }
   }
-  
+
   lastSDCardReady = sdCardReady;
 }
 
@@ -66,9 +66,9 @@ void checkSDCardStatus() {
 void initSDCard() {
   digitalWrite(SD_POWER_PIN, HIGH);
   delay(100);
-  
+
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS_PIN);
-  
+
   if (SD.begin(SD_CS_PIN)) {
     sdCardReady = true;
     sdCardError = false;
@@ -77,12 +77,13 @@ void initSDCard() {
       Serial.println("  Capacity: " + String(SD.cardSize() / (1024 * 1024)) + " MB");
       Serial.println("  SPI pins: SCK=" + String(SD_SCK) + " MISO=" + String(SD_MISO) + " MOSI=" + String(SD_MOSI) + " CS=" + String(SD_CS_PIN));
     }
-    
+
     if (currentMode == MODE_CLIENT) {
       createDirectory("/client");
       createDirectory("/client/" + sanitizeFilename(client_id));
     } else {
       createDirectory("/server");
+      createDirectory("/server/system");
     }
   } else {
     sdCardReady = false;
@@ -118,21 +119,17 @@ void createDirectory(String path) {
   }
 }
 
-// Sanitize filename - remove unsafe characters
 String sanitizeFilename(String input) {
   String result = "";
   for (unsigned int i = 0; i < input.length(); i++) {
     char c = input.charAt(i);
-    // Only allow alphanumeric, underscore, hyphen
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
         (c >= '0' && c <= '9') || c == '_' || c == '-') {
       result += c;
     } else if (c == ' ') {
-      result += '_';  // Replace space with underscore
+      result += '_';
     }
-    // Skip other characters (including special chars that cause garbled names)
   }
-  // If result is empty, use default
   if (result.length() == 0) {
     result = "UNKNOWN";
   }
@@ -143,28 +140,28 @@ void saveDataToSD(String data, String clientId, bool isServer) {
   if (!sdCardReady) {
     return;
   }
-  
+
   char path[128];
   char safeClientId[32];
   char clientDir[64];
-  
+
   clientId.toCharArray(safeClientId, sizeof(safeClientId));
   sanitizeFilenameInPlace(safeClientId);
-  
+
   if (isServer) {
     snprintf(clientDir, sizeof(clientDir), "/server/%s", safeClientId);
-    snprintf(path, sizeof(path), "%s/%s_%s_%s.txt", 
-             clientDir, logFileName.c_str(), safeClientId, getDateString().c_str());
+    snprintf(path, sizeof(path), "%s/%s_%s.txt",
+             clientDir, logFileName.c_str(), getDateString().c_str());
     createDirectory("/server");
     createDirectory(clientDir);
   } else {
     snprintf(clientDir, sizeof(clientDir), "/client/%s", safeClientId);
-    snprintf(path, sizeof(path), "%s/%s_%s_%s.txt", 
-             clientDir, logFileName.c_str(), safeClientId, getDateString().c_str());
+    snprintf(path, sizeof(path), "%s/%s_%s.txt",
+             clientDir, logFileName.c_str(), getDateString().c_str());
     createDirectory("/client");
     createDirectory(clientDir);
   }
-  
+
   File file = SD.open(path, FILE_APPEND);
   if (file) {
     file.println(data);
@@ -177,11 +174,30 @@ void saveDataToSD(String data, String clientId, bool isServer) {
   }
 }
 
+void saveServerSystemLog(String data) {
+  if (!sdCardReady) {
+    return;
+  }
+
+  createDirectory("/server");
+  createDirectory("/server/system");
+
+  String fileName = "system_" + getDateString() + ".txt";
+  char path[64];
+  snprintf(path, sizeof(path), "/server/system/%s", fileName.c_str());
+
+  File file = SD.open(path, FILE_APPEND);
+  if (file) {
+    file.println(data);
+    file.close();
+  }
+}
+
 void sanitizeFilenameInPlace(char* str) {
   int j = 0;
   for (int i = 0; str[i]; i++) {
     char c = str[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
         (c >= '0' && c <= '9') || c == '_' || c == '-') {
       str[j++] = c;
     } else if (c == ' ') {

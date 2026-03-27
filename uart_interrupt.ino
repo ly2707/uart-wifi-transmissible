@@ -89,19 +89,27 @@ void handleHighSpeedUART() {
 
 void handleHighSpeedUARTWithWebBuffer() {
   int ch;
+  static String uartLineBuffer = "";
   
   while ((ch = readUART2Buffer()) >= 0) {
     if (ch == '\r') {
-      // 跳过\r，不输出
       continue;
     } else if (ch == '\n') {
       Serial.print("\r\n");
       tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
       appendToSerialBuffer("\n");
+      
+      if (currentMode == MODE_CLIENT && logToSD && sdCardReady) {
+        if (uartLineBuffer.length() > 0) {
+          saveDataToSD(uartLineBuffer, client_id, false);
+          uartLineBuffer = "";
+        }
+      }
     } else {
       Serial.write((uint8_t)ch);
       tcpSendBuffer[tcpSendBufferLen++] = (uint8_t)ch;
       appendToSerialBuffer((char)ch);
+      uartLineBuffer += (char)ch;
     }
     
     if (tcpSendBufferLen >= TCP_SEND_BUFFER_SIZE) {
@@ -121,7 +129,6 @@ void handleHighSpeedUARTWithWebBuffer() {
   }
 }
 
-// Select client for transparent mode
 void selectClient(int index) {
   if (currentMode != MODE_SERVER) {
     Serial.println("Only available in server mode");
@@ -148,7 +155,6 @@ void selectClient(int index) {
   }
 }
 
-// Display selectable client list
 void listSelectableClients() {
   if (currentMode != MODE_SERVER) {
     Serial.println("Only available in server mode");
