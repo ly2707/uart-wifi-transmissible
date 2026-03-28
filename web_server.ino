@@ -620,9 +620,6 @@ void handleClientPage(WiFiClient client, String request) {
   html += "  xhr.open('POST', '/client/send?client_id=" + String(clientIdx) + "', true);";
   html += "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');";
   html += "  xhr.send('data=' + encodeURIComponent(input.value));";
-  html += "  var output = document.getElementById('serialData');";
-  html += "  output.value += '[发送] ' + input.value + '\\n';";
-  html += "  output.scrollTop = output.scrollHeight;";
   html += "  input.value = '';";
   html += "}";
   html += "document.getElementById('serialInput').addEventListener('keypress', function(e){";
@@ -654,8 +651,8 @@ void handleClientSend(WiFiClient client, String request) {
   
   if (clientIdx >= 0 && clientIdx < MAX_CLIENTS && serverClients[clientIdx] && serverClients[clientIdx].connected()) {
     if (data.length() > 0) {
-      serverClients[clientIdx].println(data);
-      clientSerialData[clientIdx] += "[发送] " + data + "\n";
+      data += "\n";
+      serverClients[clientIdx].write(data.c_str(), data.length());
     }
   }
   
@@ -983,7 +980,7 @@ String urlDecode(String input) {
   return result;
 }
 
-// 处理日志预览
+// 处理日志预览（分页版本）
 void handlePreviewLog(WiFiClient client, String request) {
   int fileStart = request.indexOf("file=") + 5;
   int fileEnd = request.indexOf("&", fileStart);
@@ -994,15 +991,12 @@ void handlePreviewLog(WiFiClient client, String request) {
   if (fileEnd == -1) fileEnd = request.length();
   String filePath = request.substring(fileStart, fileEnd);
   
-  // URL解码
   filePath = urlDecode(filePath);
   
-  // 规范化路径：移除多余的斜杠
   while (filePath.indexOf("//") >= 0) {
     filePath.replace("//", "/");
   }
   
-  // 安全检查：防止路径遍历攻击
   if (filePath.indexOf("..") != -1) {
     client.println("HTTP/1.1 403 Forbidden");
     client.println("Content-Type: text/html");
@@ -1011,7 +1005,6 @@ void handlePreviewLog(WiFiClient client, String request) {
     return;
   }
   
-  // 允许访问 /server/ 和 /client/ 路径下的文件
   if (!filePath.startsWith("/server/") && !filePath.startsWith("/client/")) {
     client.println("HTTP/1.1 403 Forbidden");
     client.println("Content-Type: text/html");
@@ -1020,72 +1013,146 @@ void handlePreviewLog(WiFiClient client, String request) {
     return;
   }
   
+  int page = 1;
+  int pagePos = request.indexOf("page=");
+  if (pagePos >= 0) {
+    pagePos += 5;
+    int pageEnd = request.indexOf("&", pagePos);
+    int pageSpaceEnd = request.indexOf(" ", pagePos);
+    if (pageEnd == -1 || (pageSpaceEnd != -1 && pageSpaceEnd < pageEnd)) {
+      pageEnd = pageSpaceEnd;
+    }
+    if (pageEnd == -1) pageEnd = request.length();
+    String pageStr = request.substring(pagePos, pageEnd);
+    page = pageStr.toInt();
+    if (page < 1) page = 1;
+  }
+  
+  const int linesPerPage = 100;
+  
   File file = SD.open(filePath);
   if (file) {
     String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+    unsigned long fileSize = file.size();
+    
+    int totalLines = 0;
+    unsigned long linePositions[10000];
+    int maxLinePositions = 10000;
+    linePositions[0] = 0;
+    
+    while (file.available() && totalLines < maxLinePositions - 1) {
+      char c = file.read();
+      if (c == '\n') {
+        totalLines++;
+        linePositions[totalLines] = file.position();
+      }
+    }
+    if (file.available() == false && totalLines < maxLinePositions) {
+      if (fileSize > 0) {
+        totalLines++;
+      }
+    }
+    
+    int totalPages = (totalLines + linesPerPage - 1) / linesPerPage;
+    if (totalPages < 1) totalPages = 1;
+    
+    if (page > totalPages) page = totalPages;
+    
+    int startLine = (page - 1) * linesPerPage;
+    int endLine = startLine + linesPerPage;
+    if (endLine > totalLines) endLine = totalLines;
+    
     String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
     html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
     html += "<title>预览: " + fileName + "</title>";
-    html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
-    html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
+    html += "<style>";
+    html += "*{box-sizing:border-box;margin:0;padding:0;}";
+    html += "body{font-family:Arial,sans-serif;margin:0;background:#f5f5f5;font-size:14px;}";
+    html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);min-height:100vh;}";
     html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;word-break:break-all;}";
     html += ".info{background:#e7f3fe;border-left:4px solid #2196F3;padding:10px;margin:10px 0;font-size:13px;}";
-    html += ".preview-box{background:#1e1e1e;border:1px solid #333;border-radius:5px;padding:12px;margin:12px 0;height:400px;overflow-y:scroll;font-family:monospace;font-size:12px;color:#0f0;white-space:pre-wrap;word-wrap:break-word;}";
+    html += ".preview-box{background:#1e1e1e;border:1px solid #333;border-radius:5px;padding:8px;margin:12px 0;height:400px;overflow-y:scroll;font-family:monospace;font-size:11px;color:#0f0;white-space:pre-wrap;word-wrap:break-word;line-height:1.0;}";
     html += ".preview-box::-webkit-scrollbar{width:8px;}";
     html += ".preview-box::-webkit-scrollbar-track{background:#2d2d2d;}";
     html += ".preview-box::-webkit-scrollbar-thumb{background:#555;border-radius:4px;}";
     html += ".preview-box::-webkit-scrollbar-thumb:hover{background:#777;}";
-    html += ".actions{margin:15px 0;display:flex;gap:8px;}";
+    html += ".line-num{color:#888;margin-right:8px;user-select:none;}";
+    html += ".pagination{display:flex;flex-wrap:nowrap;gap:6px;align-items:center;justify-content:center;margin:15px 0;padding:10px 0;overflow-x:auto;}";
+    html += ".pagination button,.pagination a{padding:6px 10px;background:#2196F3;color:white;border:none;border-radius:4px;cursor:pointer;text-decoration:none;font-size:12px;transition:all 0.2s;white-space:nowrap;}";
+    html += ".pagination button:hover,.pagination a:hover{background:#1976D2;}";
+    html += ".pagination button:disabled{background:#ccc;cursor:not-allowed;}";
+    html += ".pagination .page-info{padding:6px 10px;background:#fff;border:1px solid #ddd;border-radius:4px;font-size:12px;white-space:nowrap;}";
+    html += ".pagination input[type='number']{width:50px;padding:4px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;}";
+    html += ".actions{margin:15px 0;display:flex;flex-wrap:wrap;gap:8px;}";
     html += ".actions a{padding:8px 16px;background:#2196F3;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
     html += ".actions a:hover{background:#1976D2;transform:translateY(-1px);}";
     html += ".back{margin-top:10px;}";
     html += ".back a{padding:8px 16px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;font-size:13px;transition:all 0.2s ease;}";
     html += ".back a:hover{background:#45a049;transform:translateY(-1px);}";
-    html += "@media screen and (min-width: 600px) {";
-    html += ".container{max-width:900px;padding:15px;}";
-    html += ".preview-box{height:500px;}";
-    html += "}";
-    html += "@media screen and (max-width: 480px) {";
-    html += ".container{max-width:95%;padding:10px;}";
-    html += "h1{font-size:16px;}";
-    html += "}";
+    html += "@media screen and (min-width: 600px){.container{max-width:900px;padding:15px;}.preview-box{height:500px;}}";
+    html += "@media screen and (max-width: 480px){.container{max-width:95%;padding:10px;}h1{font-size:16px;}}";
     html += "</style></head><body>";
     html += "<div class='container'>";
     html += "<h1>📄 " + fileName + "</h1>";
     
     html += "<div class='info'>";
     html += "<strong>路径:</strong> " + filePath + "<br>";
-    html += "<strong>大小:</strong> " + formatFileSize(file.size());
+    html += "<strong>大小:</strong> " + formatFileSize(fileSize) + "<br>";
+    html += "<strong>总行数:</strong> " + String(totalLines) + " 行<br>";
+    html += "<strong>当前页:</strong> " + String(page) + " / " + String(totalPages) + " 页";
     html += "</div>";
     
-    html += "<div class='actions'>";
-    html += "<a href='/download?file=" + filePath + "'>下载文件</a>";
-    html += "<a href='/logs'>返回列表</a>";
+    html += "<div class='pagination'>";
+    html += "<a href='/preview?file=" + filePath + "&page=1'>&laquo; 首页</a>";
+    if (page > 1) {
+      html += "<a href='/preview?file=" + filePath + "&page=" + String(page - 1) + "'>&lsaquo; 上页</a>";
+    } else {
+      html += "<button disabled>&lsaquo; 上页</button>";
+    }
+    html += "<span class='page-info'>第 <input type='number' id='pageInput' value='" + String(page) + "' min='1' max='" + String(totalPages) + "' onchange='gotoPage()'> / " + String(totalPages) + " 页</span>";
+    if (page < totalPages) {
+      html += "<a href='/preview?file=" + filePath + "&page=" + String(page + 1) + "'>下页 &rsaquo;</a>";
+    } else {
+      html += "<button disabled>下页 &rsaquo;</button>";
+    }
+    html += "<a href='/preview?file=" + filePath + "&page=" + String(totalPages) + "'>尾页 &raquo;</a>";
     html += "</div>";
+    html += "<script>function gotoPage(){var p=parseInt(document.getElementById('pageInput').value);if(p>=1&&p<=" + String(totalPages) + "){window.location.href='/preview?file=" + filePath + "&page='+p;}}</script>";
     
     html += "<div class='preview-box'>";
-    const int maxPreviewSize = 16384; // 16KB
-    int bytesRead = 0;
-    while (file.available() && bytesRead < maxPreviewSize) {
-      char c = file.read();
-      bytesRead++;
-      if (c == '<') html += "&lt;";
-      else if (c == '>') html += "&gt;";
-      else if (c == '&') html += "&amp;";
-      else if (c == '"') html += "&quot;";
-      else if (c == '\'') html += "&#39;";
-      else if (c == '\r') {} // 忽略回车符
-      else html += c;
-    }
     
-    if (file.available()) {
-      html += "\n\n... [文件过大，仅显示前" + String(bytesRead) + "字节]";
+    if (startLine < totalLines) {
+      unsigned long startPos = linePositions[startLine];
+      file.seek(startPos);
+      
+      int currentLine = startLine;
+      int linesRead = 0;
+      
+      while (file.available() && currentLine < endLine) {
+        char c = file.read();
+        if (c == '\n') {
+          html += '\n';
+          currentLine++;
+          linesRead++;
+        } else if (c == '\r') {
+        } else {
+          if (c == '<') html += "&lt;";
+          else if (c == '>') html += "&gt;";
+          else if (c == '&') html += "&amp;";
+          else if (c == '"') html += "&quot;";
+          else if (c == '\'') html += "&#39;";
+          else html += c;
+        }
+      }
     }
     
     html += "</div>";
     
-    html += "<div class='back'><a href='/logs'>返回日志列表</a></div>";
+    html += "<div class='actions' style='justify-content:center;'>";
+    html += "<a href='/download?file=" + filePath + "'>下载文件</a>";
+    html += "<a href='/logs'>返回日志列表</a>";
+    html += "</div>";
     html += "</div>";
     html += "</body></html>";
     client.print(html);
