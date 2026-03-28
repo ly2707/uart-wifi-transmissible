@@ -1031,7 +1031,7 @@ void handlePreviewLog(WiFiClient client, String request) {
     return;
   }
   
-  int page = 1;
+  int page = -1;
   int pagePos = request.indexOf("page=");
   if (pagePos >= 0) {
     pagePos += 5;
@@ -1061,6 +1061,8 @@ void handlePreviewLog(WiFiClient client, String request) {
     
     int totalPages = (totalLines + linesPerPage - 1) / linesPerPage;
     if (totalPages < 1) totalPages = 1;
+    
+    if (page < 0) page = totalPages;
     if (page > totalPages) page = totalPages;
     
     int startLine = (page - 1) * linesPerPage;
@@ -1156,6 +1158,7 @@ void handlePreviewLog(WiFiClient client, String request) {
     client.println("<a href='/logs'>返回日志列表</a>");
     client.println("</div>");
     client.println("</div>");
+    client.println("<script>window.onload=function(){var box=document.querySelector('.preview-box');if(box)box.scrollTop=box.scrollHeight;};</script>");
     client.println("</body></html>");
     file.close();
   } else {
