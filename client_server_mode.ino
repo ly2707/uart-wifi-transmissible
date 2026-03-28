@@ -133,7 +133,6 @@ void runClientMode() {
 
     if (WiFi.status() == WL_CONNECTED) {
       wifiConnected = true;
-      Serial.println("WiFi reconnected");
       connectToServer();
     }
   }
@@ -151,10 +150,10 @@ void runClientMode() {
     uint8_t buf[256];
     size_t readBytes = tcpClient.read(buf, toRead);
 
-    // ʹ��DMA����
+    // 使用DMA发送
     uart_write_bytes(UART_NUM_2, (const char *)buf, readBytes);
     
-    // ��¼���յ�����־
+    // 记录接收的日志
     if (logToSD && sdCardReady) {
       for (size_t j = 0; j < readBytes; j++) {
         char c = buf[j];
@@ -274,14 +273,28 @@ void runServerMode() {
         uint8_t buf[256];
         size_t readBytes = serverClients[i].read(buf, toRead);
 
-        // ʹ��DMA����
+        // 先写入服务器调试串口显示
+        Serial.write((char*)buf, readBytes);
+        
+        // 写入网页串口显示缓冲区（全局）
+        noInterrupts();
+        appendToSerialBuffer((char*)buf, readBytes);
+        interrupts();
+        
+        // 写入客户端专属缓冲区（用于客户端详情页）
+        for (size_t j = 0; j < readBytes; j++) {
+          if (buf[j] != '\r') {
+            clientSerialData[i] += (char)buf[j];
+          }
+        }
+        
+        // 透传到服务器UART2（可选）
         uart_write_bytes(UART_NUM_2, (const char *)buf, readBytes);
 
-        // ��¼��־��������Web��ʾ
+        // 记录日志到SD卡
         for (size_t j = 0; j < readBytes; j++) {
           char c = buf[j];
           if (c == '\n') {
-            clientSerialData[i] += '\n';
             clientLineBuffer[i] += '\n';
             if (clientLineBuffer[i].length() > 1) {
               if (logToSD && sdCardReady) {
@@ -291,7 +304,6 @@ void runServerMode() {
             }
             clientLineBuffer[i] = "";
           } else if (c != '\r') {
-            clientSerialData[i] += c;
             clientLineBuffer[i] += c;
           }
         }
