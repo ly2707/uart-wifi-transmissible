@@ -1283,7 +1283,7 @@ void handleSerialSend(WiFiClient client, String request) {
   }
   
   if (data.length() > 0) {
-    data += "\r\n";
+    data += "\n";
     
     // 服务器模式：根据target发送
     if (currentMode == MODE_SERVER) {
@@ -1320,14 +1320,21 @@ void handleSerialClear(WiFiClient client) {
 }
 
 void appendToSerialBuffer(char c) {
-  serialDisplayBuffer += String(c);
+  if (c != '\r') {
+    serialDisplayBuffer += String(c);
+  }
   if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
     serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
   }
 }
 
 void appendToSerialBuffer(const char* str) {
-  serialDisplayBuffer += String(str);
+  while (*str) {
+    if (*str != '\r') {
+      serialDisplayBuffer += *str;
+    }
+    str++;
+  }
   if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
     serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
   }
@@ -1335,7 +1342,9 @@ void appendToSerialBuffer(const char* str) {
 
 void appendToSerialBuffer(const char* str, int len) {
   for (int i = 0; i < len; i++) {
-    serialDisplayBuffer += str[i];
+    if (str[i] != '\r') {
+      serialDisplayBuffer += str[i];
+    }
   }
   if (serialDisplayBuffer.length() > SERIAL_DISPLAY_BUFFER_SIZE) {
     serialDisplayBuffer = serialDisplayBuffer.substring(serialDisplayBuffer.length() - SERIAL_DISPLAY_BUFFER_SIZE / 2);
