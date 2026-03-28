@@ -14,7 +14,12 @@ void handleUSBSerial() {
   while (Serial.available()) {
     char incoming = Serial.read();
     
-    // 使用DMA发送
+    // 服务器模式：发送到选中的客户端（TCP），客户端会转发到其UART2
+    if (currentMode == MODE_SERVER && selectedClientIndex >= 0) {
+      queueTCPWrite((uint8_t)incoming);
+    }
+    
+    // 同时也发送到本地UART2（透传）
     uart_write_bytes(UART_NUM_2, &incoming, 1);
     
     // 客户端模式：记录发送的日志到SD卡

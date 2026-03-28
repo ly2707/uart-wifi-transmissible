@@ -21,6 +21,12 @@ uint16_t tcpSendBufferLen = 0;
 
 int selectedClientIndex = -1;
 
+void queueTCPWrite(uint8_t byte) {
+  if (tcpSendBufferLen < TCP_SEND_BUFFER_SIZE) {
+    tcpSendBuffer[tcpSendBufferLen++] = byte;
+  }
+}
+
 // DMA接收任务
 void uartRxTask(void *arg) {
   uart_event_t event;
@@ -62,10 +68,12 @@ void uartRxTask(void *arg) {
             // 写入Serial
             Serial.write((char*)filteredBuf, filteredLen);
             
-            // 写入Web串口显示缓冲区
-            appendToSerialBuffer((char*)filteredBuf, filteredLen);
+            // 写入Web串口显示缓冲区（只在非透传模式下写入）
+            if (selectedClientIndex < 0) {
+              appendToSerialBuffer((char*)filteredBuf, filteredLen);
+            }
             
-            // 同时写入TCP缓冲区
+            // 写入TCP缓冲区（服务器模式转发到客户端，客户端模式转发到服务器）
             if (currentMode == MODE_SERVER || (currentMode == MODE_CLIENT && tcpConnected)) {
               for (int i = 0; i < filteredLen; i++) {
                 if (tcpSendBufferLen < TCP_SEND_BUFFER_SIZE) {
@@ -178,6 +186,8 @@ void flushTCPBuffer() {
     if (selectedClientIndex >= 0 && selectedClientIndex < MAX_CLIENTS) {
       if (serverClients[selectedClientIndex] && serverClients[selectedClientIndex].connected()) {
         serverClients[selectedClientIndex].write(tcpSendBuffer, tcpSendBufferLen);
+      } else {
+        selectedClientIndex = -1;
       }
     } else {
       for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -187,7 +197,10 @@ void flushTCPBuffer() {
       }
     }
   } else if (currentMode == MODE_CLIENT && tcpConnected) {
-    tcpClient.write(tcpSendBuffer, tcpSendBufferLen);
+    int sent = tcpClient.write(tcpSendBuffer, tcpSendBufferLen);
+    if (sent <= 0) {
+      tcpConnected = false;
+    }
   }
   
   tcpSendBufferLen = 0;
