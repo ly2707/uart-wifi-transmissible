@@ -18,81 +18,113 @@ void handleWebServer() {
   WiFiClient client = webServer.available();
   if (!client) return;
   
-  // 读取Web客户端请求，设置超时
+  // 先读取请求行和请求头
   String request = "";
+  bool headersComplete = false;
   unsigned long startTime = millis();
-  while (client.connected() && (millis() - startTime < 1000)) {
+  
+  while (client.connected() && !headersComplete && (millis() - startTime < 2000)) {
     if (client.available()) {
       char c = client.read();
-      if (c == '\r' || c == '\n') {
-        if (request.length() > 0) break;
-      } else {
-        request += c;
+      request += c;
+      
+      // 检查是否读到空行（header结束）
+      if (request.length() >= 4 && request.substring(request.length() - 4) == "\r\n\r\n") {
+        headersComplete = true;
+        break;
       }
     }
     delay(1);
   }
   
-  if (request.length() == 0) {
-    client.stop();
-    return;
+  // 解析Content-Length
+  int contentLength = 0;
+  int pos = request.indexOf("Content-Length:");
+  if (pos >= 0) {
+    int pos2 = request.indexOf("\r\n", pos);
+    if (pos2 > pos) {
+      String lenStr = request.substring(pos + 15, pos2);
+      lenStr.trim();
+      contentLength = lenStr.toInt();
+    }
+  }
+  
+  // 如果是POST请求，继续读取body
+  String postBody = "";
+  if (contentLength > 0) {
+    int bodyStart = request.length();
+    while (client.connected() && (millis() - startTime < 2000)) {
+      if (client.available()) {
+        char c = client.read();
+        postBody += c;
+        if (postBody.length() >= contentLength) break;
+      }
+      delay(1);
+    }
+  }
+  
+  // 构建完整的请求用于路由
+  String requestLine = request;
+  int lineEnd = request.indexOf("\r\n");
+  if (lineEnd > 0) {
+    requestLine = request.substring(0, lineEnd);
   }
   
   // 路由处理
-  if (request.indexOf("GET / ") >= 0 || request.indexOf("GET / HTTP") >= 0) {
+  if (requestLine.indexOf("GET / ") >= 0 || requestLine.indexOf("GET / HTTP") >= 0) {
     handleRootPage(client);
-  } else if (request.indexOf("GET /favicon") >= 0) {
+  } else if (requestLine.indexOf("GET /favicon") >= 0) {
     client.println("HTTP/1.1 204 No Content");
     client.println();
-  } else if (request.indexOf("GET /hotspot-detect.html") >= 0 || request.indexOf("GET /connecttest.txt") >= 0) {
+  } else if (requestLine.indexOf("GET /hotspot-detect.html") >= 0 || requestLine.indexOf("GET /connecttest.txt") >= 0) {
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/html");
     client.println();
     client.print("<!DOCTYPE html><html><head><script>window.location.href='http://192.168.1.1/';</script></head><body></body></html>");
-  } else if (request.indexOf("GET /generate_204") >= 0 || request.indexOf("GET /fwlink") >= 0) {
+  } else if (requestLine.indexOf("GET /generate_204") >= 0 || requestLine.indexOf("GET /fwlink") >= 0) {
     // Android/Windows Captive Portal
     client.println("HTTP/1.1 204 No Content");
     client.println();
-  } else if (request.indexOf("GET /ncsi.txt") >= 0) {
+  } else if (requestLine.indexOf("GET /ncsi.txt") >= 0) {
     // Windows Captive Portal
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/plain");
     client.println();
     client.print("Microsoft Connect Test");
-  } else if (request.indexOf("GET /serial ") >= 0 || request.indexOf("GET /serial") >= 0) {
-    if (request.indexOf("GET /serial/data") >= 0) {
+  } else if (requestLine.indexOf("GET /serial ") >= 0 || requestLine.indexOf("GET /serial") >= 0) {
+    if (requestLine.indexOf("GET /serial/data") >= 0) {
       handleSerialDataAPI(client);
     } else {
       handleSerialPage(client);
     }
-  } else if (request.indexOf("POST /serial/send") >= 0) {
-    handleSerialSend(client, request);
-  } else if (request.indexOf("POST /serial/clear") >= 0) {
+  } else if (requestLine.indexOf("POST /serial/send") >= 0) {
+    handleSerialSend(client, postBody);
+  } else if (requestLine.indexOf("POST /serial/clear") >= 0) {
     handleSerialClear(client);
-  } else if (request.indexOf("GET /logs") >= 0) {
+  } else if (requestLine.indexOf("GET /logs") >= 0) {
     handleLogsPage(client, request);
-  } else if (request.indexOf("GET /preview") >= 0) {
+  } else if (requestLine.indexOf("GET /preview") >= 0) {
     handlePreviewLog(client, request);
-  } else if (request.indexOf("GET /status ") >= 0) {
+  } else if (requestLine.indexOf("GET /status ") >= 0) {
     handleStatusPage(client);
-  } else if (request.indexOf("GET /client") >= 0) {
+  } else if (requestLine.indexOf("GET /client") >= 0) {
     handleClientPage(client, request);
-  } else if (request.indexOf("POST /client/send") >= 0) {
-    handleClientSend(client, request);
-  } else if (request.indexOf("GET /config ") >= 0) {
+  } else if (requestLine.indexOf("POST /client/send") >= 0) {
+    handleClientSend(client, postBody);
+  } else if (requestLine.indexOf("GET /config ") >= 0) {
     handleConfigPage(client);
-  } else if (request.indexOf("POST /saveconfig") >= 0) {
+  } else if (requestLine.indexOf("POST /saveconfig") >= 0) {
     handleSaveConfig(client);
-  } else if (request.indexOf("GET /download") >= 0) {
+  } else if (requestLine.indexOf("GET /download") >= 0) {
     handleDownloadLog(client, request);
-  } else if (request.indexOf("GET /clear ") >= 0) {
+  } else if (requestLine.indexOf("GET /clear ") >= 0) {
     handleClearLog(client);
-  } else if (request.indexOf("GET /deletedir") >= 0) {
+  } else if (requestLine.indexOf("GET /deletedir") >= 0) {
     handleDeleteDirectory(client, request);
-  } else if (request.indexOf("GET /delete?file=") >= 0) {
+  } else if (requestLine.indexOf("GET /delete?file=") >= 0) {
     handleDeleteFile(client, request);
-  } else if (request.indexOf("POST /power") >= 0) {
-    handlePowerControl(client, request);
+  } else if (requestLine.indexOf("POST /power") >= 0) {
+    handlePowerControl(client, postBody);
   } else {
     handleNotFound(client);
   }
@@ -1106,11 +1138,24 @@ void handleSerialPage(WiFiClient client) {
   html += "<h1 style='margin:0;'>🖥️ 串口监视器</h1>";
   html += "</div>";
   html += "<div class='header-info'>波特率: " + String(uart2BaudRate) + " | 模式: " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "</div>";
-  html += "<select id='sourceSelect' onchange='changeSource()' style='background:#333;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
-  html += "<option value='server'>服务器全局</option>";
+  html += "</div>";
+  html += "<div style='background:#333;padding:8px 15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'>";
+  html += "<span style='color:#888;font-size:12px;'>显示:</span>";
+  html += "<select id='sourceSelect' onchange='changeSource()' style='background:#444;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
+  html += "<option value='server'>服务器</option>";
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected()) {
       html += "<option value='client_" + String(i) + "'>客户端 " + String(i) + "</option>";
+    }
+  }
+  html += "</select>";
+  html += "<span style='color:#888;font-size:12px;margin-left:10px;'>发送目标:</span>";
+  html += "<select id='targetSelect' style='background:#444;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
+  html += "<option value='-1'>全部/本地UART</option>";
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (serverClients[i] && serverClients[i].connected()) {
+      String sel = (selectedClientIndex == i) ? " selected" : "";
+      html += "<option value='" + String(i) + "'" + sel + ">客户端 " + String(i) + "</option>";
     }
   }
   html += "</select>";
@@ -1129,8 +1174,6 @@ void handleSerialPage(WiFiClient client) {
   html += "<span>最后更新: <span id='lastUpdate'>--</span></span>";
   html += "</div>";
   html += "<script>";
-  html += "var lastDataLen = 0;";
-  html += "var lastTimestamp = 0;";
   html += "var currentSource = 'server';";
   html += "var serialData = {server: '', client_0: '', client_1: '', client_2: '', client_3: '', client_4: ''};";
   html += "function changeSource(){";
@@ -1176,12 +1219,12 @@ void handleSerialPage(WiFiClient client) {
   html += "function sendData(){";
   html += "  var input = document.getElementById('serialInput');";
   html += "  if(input.value.trim() === '') return;";
+  html += "  var target = document.getElementById('targetSelect').value;";
   html += "  var xhr = new XMLHttpRequest();";
   html += "  xhr.open('POST', '/serial/send', true);";
   html += "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');";
-  html += "  xhr.send('data=' + encodeURIComponent(input.value));";
+  html += "  xhr.send('data=' + encodeURIComponent(input.value) + '&target=' + target);";
   html += "  var output = document.getElementById('serialOutput');";
-  html += "  output.value += '[发送] ' + input.value + '\\n';";
   html += "  output.scrollTop = output.scrollHeight;";
   html += "  input.value = '';";
   html += "}";
@@ -1214,31 +1257,51 @@ void handleSerialDataAPI(WiFiClient client) {
   String response = filterAnsiEscape(serialDisplayBuffer);
   serialDisplayBuffer = "";
   
-  if (currentMode == MODE_SERVER) {
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-      if (serverClients[i] && serverClients[i].connected() && clientSerialData[i].length() > 0) {
-        String filtered = filterAnsiEscape(clientSerialData[i]);
-        response += "[客户端";
-        response += i;
-        response += "] ";
-        response += filtered;
-        clientSerialData[i] = "";
-      }
-    }
-  }
-  
   client.print(response);
 }
 
 void handleSerialSend(WiFiClient client, String request) {
-  int dataIndex = request.indexOf("data=") + 5;
+  int dataIndex = request.indexOf("data=");
+  if (dataIndex < 0) {
+    return;
+  }
+  dataIndex += 5;
   int dataEnd = request.indexOf("&", dataIndex);
   if (dataEnd == -1) dataEnd = request.length();
   String data = request.substring(dataIndex, dataEnd);
   data = urlDecode(data);
   
+  int targetIndex = -1;
+  int targetPos = request.indexOf("target=");
+  if (targetPos >= 0) {
+    targetPos += 7;
+    int targetEnd = request.indexOf("&", targetPos);
+    if (targetEnd == -1) targetEnd = request.length();
+    String targetStr = request.substring(targetPos, targetEnd);
+    targetStr.trim();
+    targetIndex = targetStr.toInt();
+  }
+  
   if (data.length() > 0) {
-    Serial2.println(data);
+    data += "\r\n";
+    
+    // 服务器模式：根据target发送
+    if (currentMode == MODE_SERVER) {
+      if (targetIndex >= 0 && targetIndex < MAX_CLIENTS) {
+        // 设置选中的客户端
+        selectedClientIndex = targetIndex;
+        // 发送到指定客户端
+        if (serverClients[targetIndex] && serverClients[targetIndex].connected()) {
+          serverClients[targetIndex].write(data.c_str(), data.length());
+        }
+      } else {
+        // target < 0 或无效，发送到本地UART2
+        uart_write_bytes(UART_NUM_2, data.c_str(), data.length());
+      }
+    } else {
+      // 客户端模式，发送到本地UART2
+      uart_write_bytes(UART_NUM_2, data.c_str(), data.length());
+    }
   }
   
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
