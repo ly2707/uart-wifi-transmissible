@@ -198,7 +198,7 @@ void handleRootPage(WiFiClient client) {
   html += "<strong>UART1↔UART2透传:</strong> 已启用<br>";  // 透传功能
   html += "</div>";
   html += "<div class='menu'>";
-  html += "<a href='/serial'>🖥️ 串口监视器</a>";
+  html += "<a href='/serial'>🖥️ 串口服务器</a>";
   html += "<a href='/logs'>📋 查看日志</a>";
   html += "<a href='/status'>📊 系统状态</a>";
   html += "<a href='/config'>⚙️ 系统配置</a>";
