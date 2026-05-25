@@ -475,8 +475,8 @@ void handleStatusPage(WiFiClient client) {
   
   // WiFi信息
   html += "<div class='status'>";
-  html += "<h2>WiFi信息</h2>";
-  html += "<strong>状态:</strong> " + String(wifiConnected ? "已连接" : "未连接") + "<br>";
+  html += "<h2>WiFi_InFo</h2>";
+  html += "<strong>连接状态:</strong> " + String(wifiConnected ? "已连接" : "未连接") + "<br>";
   if (wifiConnected) {
     if (currentMode == MODE_SERVER) {
       html += "<strong>AP SSID:</strong> " + maskSensitiveValue(ap_ssid) + "<br>";
