@@ -6,7 +6,3 @@ directories:
   data: D:\arduino-ide\Arduino15
   downloads: D:\arduino-ide\Arduino15\staging
   user: D:\arduino-ide\Arduino
-
-build:
-  export_binaries: true
-  path: build\esp32.esp32.esp32s3
