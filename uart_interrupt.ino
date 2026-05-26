@@ -4,6 +4,7 @@
 static QueueHandle_t uartQueue = NULL;
 static TaskHandle_t uartTaskHandle = NULL;
 bool uartDmaInitialized = false;
+volatile bool uart2StartupForwardingEnabled = false;
 portMUX_TYPE tcpSendBufferMux = portMUX_INITIALIZER_UNLOCKED;
 
 #define UART_DMA_RX_BUF_SIZE 8192
@@ -46,6 +47,10 @@ void uartRxTask(void *arg) {
 
         int len = uart_read_bytes(UART_NUM_2, buf, toRead, 0);
         if (len > 0) {
+          if (!uart2StartupForwardingEnabled) {
+            continue;
+          }
+
           // 过滤ANSI转义序列到临时缓冲区
           static uint8_t filteredBuf[1024];
           int filteredLen = 0;
@@ -178,6 +183,14 @@ void initUARTInterrupt(bool reinstall) {
       Serial.println("UART DMA mode enabled!");
     }
   }  // 始终打印调试信息
+}
+
+void finishUART2StartupForwarding() {
+  if (uartDmaInitialized) {
+    uart_flush_input(UART_NUM_2);
+  }
+
+  uart2StartupForwardingEnabled = true;
 }
 
 // 备用：中断模式读取函数（当DMA不可用时）

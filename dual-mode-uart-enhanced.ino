@@ -11,12 +11,21 @@
 #include <esp_log.h>
 #include <driver/uart.h>
 #include "security_hardening.h"
+#include "firmware_build_info.h"
 
 // ==================== 版本信息 ====================
 #define FIRMWARE_VERSION "v2.5.0"  // 优化串口透传速度，批量写入TCP缓冲区
 #define VERSION_MAJOR 2
 #define VERSION_MINOR 5
 #define VERSION_PATCH 0
+
+#ifndef FIRMWARE_BUILD_DATE
+#define FIRMWARE_BUILD_DATE __DATE__
+#endif
+
+#ifndef FIRMWARE_BUILD_TIME
+#define FIRMWARE_BUILD_TIME __TIME__
+#endif
 
 // 版本历史：
 // v2.5.0 - 2026-03-26 - 优化串口透传速度，批量写入TCP缓冲区，移除重复读取
@@ -331,6 +340,7 @@ void handleHighSpeedUART();
 void handleHighSpeedUARTWithWebBuffer();
 void initUARTInterrupt(bool reinstall = false);
 void initUART1Interrupt(bool reinstall = false);
+void finishUART2StartupForwarding();
 void handleUSBSerial();
 String formatClientData(String data);
 String filterAnsiEscape(String input);
@@ -345,6 +355,17 @@ void flashLED();
 void requestMultiFlash(CRGB color, int times, unsigned long interval);
 String getDateString();
 void printHelp();
+void printStartupIdentity();
+
+void printStartupIdentity() {
+  Serial.println();
+  Serial.println("=== Firmware Boot ===");
+  Serial.println("Version: " + String(FIRMWARE_VERSION));
+  Serial.println("Git: " + String(FIRMWARE_GIT_HASH));
+  Serial.println("Build: " + String(FIRMWARE_BUILD_DATE) + " " + String(FIRMWARE_BUILD_TIME));
+  Serial.println("=====================");
+  Serial.flush();
+}
 
 // ==================== 初始化函数 ====================
 void setup() {
@@ -359,6 +380,7 @@ void setup() {
   // 初始化调试串口（优先）
   Serial.begin(115200);
   delay(200);
+  printStartupIdentity();
   
   if (debugMode) {
     Serial.println("\n========================================");
@@ -480,6 +502,8 @@ void setup() {
     
     Serial.println("Type AT+HELP for command list\n");
   }
+
+  finishUART2StartupForwarding();
 }
 
 // ==================== 主循环 ====================

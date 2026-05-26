@@ -469,6 +469,8 @@ void handleStatusPage(WiFiClient client) {
   // 系统信息
   html += "<div class='status'>";
   html += "<strong>固件版本:</strong> " + String(FIRMWARE_VERSION) + "<br>";
+  html += "<strong>Git版本:</strong> " + String(FIRMWARE_GIT_HASH) + "<br>";
+  html += "<strong>编译时间:</strong> " + String(FIRMWARE_BUILD_DATE) + " " + String(FIRMWARE_BUILD_TIME) + "<br>";
   html += "<strong>运行模式:</strong> " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "<br>";
   html += "<strong>客户端ID:</strong> " + client_id + "<br>";
   html += "<strong>运行时间:</strong> " + String(millis() / 1000) + " 秒<br>";
