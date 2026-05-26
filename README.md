@@ -1,4 +1,4 @@
-# ESP32-S3 Dual Mode UART Enhanced
+# 串口服务器
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-ESP32--S3-00979D)](https://www.espressif.com/)
@@ -25,10 +25,11 @@
 
 ## 运行模式
 
-| 模式 | 网络角色 | 默认网络行为 | 典型用途 |
-| --- | --- | --- | --- |
-| 客户端模式 | WiFi STA + TCP Client | 连接已配置 WiFi，向 192.168.1.1:8080 发起连接 | 设备主动接入上位机/网关 |
-| 服务器模式 | WiFi SoftAP + TCP Server | 启动 AP，监听 8080，最多 5 个客户端 | 本地串口网关、现场调试热点 |
+
+| 模式       | 网络角色                 | 默认网络行为                                  | 典型用途                   |
+| ---------- | ------------------------ | --------------------------------------------- | -------------------------- |
+| 客户端模式 | WiFi STA + TCP Client    | 连接已配置 WiFi，向 192.168.1.1:8080 发起连接 | 设备主动接入上位机/网关    |
+| 服务器模式 | WiFi SoftAP + TCP Server | 启动 AP，监听 8080，最多 5 个客户端           | 本地串口网关、现场调试热点 |
 
 ## 快速开始
 
@@ -48,11 +49,21 @@
 
 说明：脚本会调用 Arduino CLI，并将产物输出到 build/esp32.esp32.esp32s3。
 
+- 默认使用与 Arduino IDE 一致的 ESP32-S3 板卡选项执行增量编译
+- 默认使用 Arduino CLI 的临时构建目录，尽量贴近 Arduino IDE 的构建行为
+- 默认将 Arduino CLI 输出直接显示到终端，避免逐行写日志拖慢构建
+- 如需强制全量重编，可执行 `./compile.ps1 -Clean`
+- 如需压缩终端输出，可执行 `./compile.ps1 -NoVerbose`
+- 如需同时保存编译日志，可执行 `./compile.ps1 -LogToFile`
+- 如需固定构建目录，可执行 `./compile.ps1 -BuildPath .\build\esp32.esp32.esp32s3`
+
 ### 3. 烧录
 
 ```powershell
-.\build_and_flash.ps1 -Port COM19
+.\build_and_flash.ps1 -Port COM5
 ```
+
+说明：该脚本会直接调用 Arduino CLI 完成 compile、upload 和 verify，默认走临时构建目录以贴近 Arduino IDE。
 
 ### 4. 首次启动建议
 
@@ -75,8 +86,9 @@
 
 项目文档已补充硬件视图整理，包含原理图、PCB 图、3D 仿真图与实物图对应说明，适合在阅读代码、查看引脚定义和做结构装配时交叉对照。
 
-| 3D 仿真图 | 实物图 |
-| --- | --- |
+
+| 3D 仿真图                        | 实物图                         |
+| -------------------------------- | ------------------------------ |
 | ![3D 仿真图](doc/picture/3D.png) | ![实物图](doc/picture/phy.jpg) |
 
 - [硬件设计资料总览](doc/hardware/README.md)
@@ -103,17 +115,18 @@
 
 ## 硬件摘要
 
-| 功能 | 引脚 |
-| --- | --- |
-| UART2 RX/TX | GPIO16 / GPIO17 |
-| UART1 RX/TX | GPIO19 / GPIO20 |
-| RGB LED | GPIO48 |
-| BOOT 按键 | GPIO0 |
-| 配网触发 | GPIO42 |
-| SD SPI | GPIO10 / GPIO11 / GPIO13 / GPIO12 |
-| SD 电源控制 | GPIO8 |
-| 电池 ADC | GPIO1 |
-| 电源控制 / 复位控制 | GPIO5 / GPIO4 |
+
+| 功能                | 引脚                              |
+| ------------------- | --------------------------------- |
+| UART2 RX/TX         | GPIO16 / GPIO17                   |
+| UART1 RX/TX         | GPIO19 / GPIO20                   |
+| RGB LED             | GPIO48                            |
+| BOOT 按键           | GPIO0                             |
+| 配网触发            | GPIO42                            |
+| SD SPI              | GPIO10 / GPIO11 / GPIO13 / GPIO12 |
+| SD 电源控制         | GPIO8                             |
+| 电池 ADC            | GPIO1                             |
+| 电源控制 / 复位控制 | GPIO5 / GPIO4                     |
 
 更完整的接线与配置说明见 [配置与接口](doc/configuration/README.md)、[硬件设计资料](doc/hardware/README.md) 和 [PCB 资料](PCB/dual-mode-uart-enhanced.pdf)。
 

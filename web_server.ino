@@ -160,7 +160,7 @@ void handleRootPage(WiFiClient client) {
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
-  html += "<title>ESP32 UART 服务器</title>";
+  html += "<title>ESP32 UART 网关</title>";
   html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
   html += ".container{max-width:100%;margin:0 auto;background:white;padding:12px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.1);}";
   html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
@@ -189,16 +189,17 @@ void handleRootPage(WiFiClient client) {
   html += "}";
   html += "</style></head><body>";
   html += "<div class='container'>";
-  html += "<h1>📡 ESP32 UART 服务器</h1>";
+  html += "<h1>📡 ESP32 UART 网关</h1>";
   html += "<div class='info'>";
   html += "<strong>固件版本:</strong> " + String(FIRMWARE_VERSION) + "<br>";
   html += "<strong>运行模式:</strong> " + String(currentMode == MODE_CLIENT ? "客户端" : "服务器") + "<br>";
-  html += "<strong>WiFi状态:</strong> " + String(wifiConnected ? "已连接" : "未连接") + "<br>";
+  html += "<strong>网络状态:</strong> " + String(currentMode == MODE_SERVER ? (wifiConnected ? "热点已启动" : "热点未启动") : (wifiConnected ? "已连接" : "未连接")) + "<br>";
   html += "<strong>SD卡状态:</strong> " + String(sdCardReady ? "正常" : "异常") + "<br>";
-  html += "<strong>UART1↔UART2透传:</strong> 已启用<br>";  // 透传功能
+  html += "<strong>UART1独立通道:</strong> 已启用<br>";
+  html += "<strong>网页发送入口:</strong> 已接入安全校验<br>";
   html += "</div>";
   html += "<div class='menu'>";
-  html += "<a href='/serial'>🖥️ 串口服务器</a>";
+  html += "<a href='/serial'>🖥️ 串口监视器</a>";
   html += "<a href='/logs'>📋 查看日志</a>";
   html += "<a href='/status'>📊 系统状态</a>";
   html += "<a href='/config'>⚙️ 系统配置</a>";
@@ -1399,7 +1400,7 @@ void handleSerialPage(WiFiClient client) {
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
-  html += "<title>串口监视器 - ESP32 UART</title>";
+  html += "<title>串口监视器 - ESP32 UART 网关</title>";
   html += "<style>";
   html += "*{box-sizing:border-box;margin:0;padding:0;}";
   html += "body{font-family:'Consolas','Monaco',monospace;margin:0;background:#1e1e1e;color:#0f0;height:100vh;display:flex;flex-direction:column;}";
@@ -1438,17 +1439,12 @@ void handleSerialPage(WiFiClient client) {
   html += "<div style='background:#333;padding:8px 15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'>";
   html += "<span style='color:#888;font-size:12px;'>显示:</span>";
   html += "<select id='sourceSelect' onchange='changeSource()' style='background:#444;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
-  html += "<option value='server'>UART2/服务器</option>";
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (serverClients[i] && serverClients[i].connected()) {
-      html += "<option value='client_" + String(i) + "'>客户端 " + String(i) + "</option>";
-    }
-  }
+  html += "<option value='server'>UART2 / 主链路</option>";
   html += "<option value='uart1'>UART1 (IO" + String(UART1_RX_PIN) + "/" + String(UART1_TX_PIN) + ")</option>";
   html += "</select>";
   html += "<span style='color:#888;font-size:12px;margin-left:10px;'>发送目标:</span>";
   html += "<select id='targetSelect' style='background:#444;color:#fff;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;'>";
-  html += "<option value='-1'>全部/本地UART2</option>";
+  html += "<option value='-1'>本地 UART2</option>";
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (serverClients[i] && serverClients[i].connected()) {
       String sel = (selectedClientIndex == i) ? " selected" : "";
@@ -1457,6 +1453,9 @@ void handleSerialPage(WiFiClient client) {
   }
   html += "<option value='uart1'>UART1 (IO" + String(UART1_TX_PIN) + ")</option>";
   html += "</select>";
+  html += "</div>";
+  html += "<div style='background:#252525;padding:8px 15px;color:#aaa;font-size:12px;border-bottom:1px solid #444;'>";
+  html += "当前页面只显示 UART2 主链路和 UART1 独立缓冲区。若需查看某个网络客户端的独立数据，请到系统状态页进入对应客户端详情。";
   html += "</div>";
   html += "<div class='serial-container'>";
   html += "<textarea class='serial-output' id='serialOutput' readonly></textarea>";
@@ -1475,7 +1474,7 @@ void handleSerialPage(WiFiClient client) {
   html += "</div>";
   html += "<script>";
   html += "var currentSource = 'server';";
-  html += "var serialData = {server: '', client_0: '', client_1: '', client_2: '', client_3: '', client_4: '', uart1: ''};";
+  html += "var serialData = {server: '', uart1: ''};";
   html += "function changeSource(){";
   html += "  currentSource = document.getElementById('sourceSelect').value;";
   html += "  document.getElementById('serialOutput').value = serialData[currentSource] || '';";
