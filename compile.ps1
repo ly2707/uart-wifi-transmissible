@@ -30,6 +30,40 @@ function Set-Utf8Console {
     cmd /c chcp 65001 > $null
 }
 
+function Get-GitShortHash {
+    param(
+        [string]$RepoPath
+    )
+
+    try {
+        $hash = & git -C $RepoPath rev-parse --short=8 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($hash)) {
+            return $hash.Trim()
+        }
+    } catch {
+    }
+
+    return "unknown"
+}
+
+function Write-FirmwareBuildInfoHeader {
+    param(
+        [string]$HeaderPath,
+        [string]$GitHash
+    )
+
+    $headerContent = @(
+        '#pragma once'
+        ''
+        '#ifndef FIRMWARE_GIT_HASH'
+        ('#define FIRMWARE_GIT_HASH "{0}"' -f $GitHash)
+        '#endif'
+        ''
+    ) -join [Environment]::NewLine
+
+    [System.IO.File]::WriteAllText($HeaderPath, $headerContent, [System.Text.Encoding]::ASCII)
+}
+
 if (-not (Test-Path $arduinoCLI)) {
     throw "Arduino CLI not found: $arduinoCLI"
 }
@@ -39,6 +73,10 @@ if ($buildPath -and -not (Test-Path $buildPath)) {
 }
 
 Set-Utf8Console
+
+$gitHash = Get-GitShortHash -RepoPath $sketchPath
+$buildInfoHeaderPath = Join-Path $sketchPath "firmware_build_info.h"
+Write-FirmwareBuildInfoHeader -HeaderPath $buildInfoHeaderPath -GitHash $gitHash
 
 $compileArgs = @(
     "compile"
@@ -80,6 +118,7 @@ Write-Host "Config file: $configLabel"
 Write-Host "Build mode: $modeLabel"
 Write-Host "Log level: $verboseLabel"
 Write-Host "Log file: $logLabel"
+Write-Host "Git hash: $gitHash"
 
 $startTime = Get-Date
 if ($LogToFile) {

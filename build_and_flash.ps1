@@ -20,6 +20,40 @@ function Set-Utf8Console {
     cmd /c chcp 65001 > $null
 }
 
+function Get-GitShortHash {
+    param(
+        [string]$RepoPath
+    )
+
+    try {
+        $hash = & git -C $RepoPath rev-parse --short=8 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($hash)) {
+            return $hash.Trim()
+        }
+    } catch {
+    }
+
+    return "unknown"
+}
+
+function Write-FirmwareBuildInfoHeader {
+    param(
+        [string]$HeaderPath,
+        [string]$GitHash
+    )
+
+    $headerContent = @(
+        '#pragma once'
+        ''
+        '#ifndef FIRMWARE_GIT_HASH'
+        ('#define FIRMWARE_GIT_HASH "{0}"' -f $GitHash)
+        '#endif'
+        ''
+    ) -join [Environment]::NewLine
+
+    [System.IO.File]::WriteAllText($HeaderPath, $headerContent, [System.Text.Encoding]::ASCII)
+}
+
 function Assert-PathExists {
     param(
         [string]$Path,
@@ -35,6 +69,10 @@ Set-Utf8Console
 
 Assert-PathExists -Path $arduinoCLI -Label "Arduino CLI"
 
+$gitHash = Get-GitShortHash -RepoPath $projectPath
+$buildInfoHeaderPath = Join-Path $projectPath "firmware_build_info.h"
+Write-FirmwareBuildInfoHeader -HeaderPath $buildInfoHeaderPath -GitHash $gitHash
+
 $availablePorts = [System.IO.Ports.SerialPort]::GetPortNames()
 if (-not $availablePorts.Contains($Port)) {
     throw "Serial port $Port is not available. Current ports: $($availablePorts -join ', ')"
@@ -47,6 +85,7 @@ Write-Host "Project: $projectPath"
 Write-Host "FQBN: $Fqbn"
 Write-Host "Port: $Port"
 Write-Host "Build path: arduino-cli temp build path"
+Write-Host "Git hash: $gitHash"
 
 Write-Host ""
 Write-Host "Running compile plus upload plus verify..." -ForegroundColor Cyan
