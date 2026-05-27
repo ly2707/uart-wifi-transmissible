@@ -1,5 +1,5 @@
 #pragma once
 
 #ifndef FIRMWARE_GIT_HASH
-#define FIRMWARE_GIT_HASH "632f9972"
+#define FIRMWARE_GIT_HASH "b3b6c668"
 #endif
