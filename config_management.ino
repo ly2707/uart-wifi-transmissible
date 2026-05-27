@@ -1,4 +1,7 @@
 ﻿// ==================== Configuration Management ====================
+const char DEFAULT_SERVER_AP_SSID[] = "UART_SERVER";
+const char DEFAULT_SERVER_AP_PASSWORD[] = "12345678";
+
 bool isSafeConfigCharacter(char value) {
   return value >= 0x20 && value <= 0x7E && value != '<' && value != '>' && value != '"' && value != '\\';
 }
@@ -72,6 +75,41 @@ void buildDefaultWifiField(const String &prefix, char *target, size_t targetSize
 void buildDefaultWifiPassword(char *target, size_t targetSize) {
   String value = "ESP32#" + buildDeviceToken() + "!";
   copyStringToBuffer(value, target, targetSize);
+}
+
+void applyDefaultServerAccessPointConfig(char *ssidTarget, size_t ssidSize, char *passwordTarget, size_t passwordSize) {
+  copyStringToBuffer(String(DEFAULT_SERVER_AP_SSID), ssidTarget, ssidSize);
+  copyStringToBuffer(String(DEFAULT_SERVER_AP_PASSWORD), passwordTarget, passwordSize);
+}
+
+bool matchesLegacyDynamicWifiConfig(const char *ssidValue, const char *passwordValue, const String &ssidPrefix) {
+  if (ssidValue == NULL || passwordValue == NULL) {
+    return false;
+  }
+
+  char legacySsid[WIFI_SSID_MAX_LEN + 1] = {0};
+  char legacyPassword[WIFI_PASSWORD_MAX_LEN + 1] = {0};
+  buildDefaultWifiField(ssidPrefix, legacySsid, sizeof(legacySsid));
+  buildDefaultWifiPassword(legacyPassword, sizeof(legacyPassword));
+
+  return strcmp(ssidValue, legacySsid) == 0 && strcmp(passwordValue, legacyPassword) == 0;
+}
+
+bool migrateLegacyDefaultWiFiConfig() {
+  bool migrated = false;
+
+  if (matchesLegacyDynamicWifiConfig(ap_ssid, ap_password, "ESP32_UART_")) {
+    applyDefaultServerAccessPointConfig(ap_ssid, sizeof(ap_ssid), ap_password, sizeof(ap_password));
+    migrated = true;
+  }
+
+  if (matchesLegacyDynamicWifiConfig(client_wifi_ssid, client_wifi_password, "ESP32_UART_")) {
+    copyStringToBuffer(String(DEFAULT_SERVER_AP_SSID), client_wifi_ssid, sizeof(client_wifi_ssid));
+    copyStringToBuffer(String(DEFAULT_SERVER_AP_PASSWORD), client_wifi_password, sizeof(client_wifi_password));
+    migrated = true;
+  }
+
+  return migrated;
 }
 
 bool validateClientIdValue(const String &value) {
@@ -152,14 +190,13 @@ String maskIpAddress(IPAddress address) {
 }
 
 void applyDefaultWiFiConfig() {
-  buildDefaultWifiField("ESP32_UART_", ap_ssid, sizeof(ap_ssid));
-  buildDefaultWifiPassword(ap_password, sizeof(ap_password));
+  applyDefaultServerAccessPointConfig(ap_ssid, sizeof(ap_ssid), ap_password, sizeof(ap_password));
 
   copyStringToBuffer(String(ap_ssid), client_wifi_ssid, sizeof(client_wifi_ssid));
   copyStringToBuffer(String(ap_password), client_wifi_password, sizeof(client_wifi_password));
 
   buildDefaultWifiField("ESP32_CFG_", wifimanager_ssid, sizeof(wifimanager_ssid));
-  copyStringToBuffer(String(ap_password), wifimanager_password, sizeof(wifimanager_password));
+  buildDefaultWifiPassword(wifimanager_password, sizeof(wifimanager_password));
 }
 
 void loadConfigFromEEPROM() {
@@ -212,8 +249,12 @@ void loadConfigFromEEPROM() {
                          validateWiFiSsidValue(String(wifimanager_ssid)) &&
                          validateWiFiPasswordValue(String(wifimanager_password), false);
 
+  bool wifiConfigMigrated = false;
+
   if (!wifiConfigValid) {
     applyDefaultWiFiConfig();
+  } else {
+    wifiConfigMigrated = migrateLegacyDefaultWiFiConfig();
   }
   
   // Load log timestamp setting
@@ -224,7 +265,7 @@ void loadConfigFromEEPROM() {
     debugMode = (savedDebugMode == 1);
   }
 
-  if (!wifiConfigValid) {
+  if (!wifiConfigValid || wifiConfigMigrated) {
     saveConfigToEEPROM();
   }
   

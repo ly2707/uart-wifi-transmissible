@@ -87,13 +87,30 @@
 项目文档已补充硬件视图整理，包含原理图、PCB 图、3D 仿真图与实物图对应说明，适合在阅读代码、查看引脚定义和做结构装配时交叉对照。
 
 
-| 3D 仿真图                        | 实物图                         |
-| -------------------------------- | ------------------------------ |
-| ![3D 仿真图](doc/picture/3D.png) | ![实物图](doc/picture/phy.jpg) |
+| 原理图 |
+| ------ |
+| ![原理图](doc/picture/DSN.png) |
+
+| PCB 正面 |
+| -------- |
+| ![PCB 正面](doc/picture/PCB-A.png) |
+
+| PCB 背面 |
+| -------- |
+| ![PCB 背面](doc/picture/PCB-B.png) |
+
+| 3D 仿真图 |
+| --------- |
+| ![3D 仿真图](doc/picture/3D.png) |
+
+| 实物图 |
+| ------ |
+| ![实物图](doc/picture/phy.jpg) |
 
 - [硬件设计资料总览](doc/hardware/README.md)
-- 重点包含 3D 仿真图与实物图的接口分布、按键位置、SD 卡槽与 UART 接口对照
-- 原理图与 PCB 正反面图已同步收录在硬件设计资料页
+- 重点包含原理图、PCB 正反面、3D 仿真图与实物图的接口分布、按键位置、SD 卡槽与 UART 接口对照
+- 本项目硬件已经完成打板与贴片，并基于实物进行了功能验证
+- 上传的硬件源文件可使用嘉立创 EDA 直接打开，源文件位于 [PCB/dual-mode-uart-enhanced_v0.8.dsn](PCB/dual-mode-uart-enhanced_v0.8.dsn)
 
 ## 仓库结构
 
@@ -109,7 +126,7 @@
 |-- security_hardening.h/.ino     # 安全帧、白名单、超时与封禁
 |-- compile.ps1                   # Arduino CLI 编译脚本
 |-- build_and_flash.ps1           # 编译后烧录脚本
-|-- PCB/                          # PCB 设计和 PDF 导出文件
+|-- PCB/                          # PCB 设计源文件和导出文件
 `-- doc/                          # 详细工程文档（含硬件设计资料）
 ```
 
@@ -128,7 +145,7 @@
 | 电池 ADC            | GPIO1                             |
 | 电源控制 / 复位控制 | GPIO5 / GPIO4                     |
 
-更完整的接线与配置说明见 [配置与接口](doc/configuration/README.md)、[硬件设计资料](doc/hardware/README.md) 和 [PCB 资料](PCB/dual-mode-uart-enhanced.pdf)。
+更完整的接线与配置说明见 [配置与接口](doc/configuration/README.md)、[硬件设计资料](doc/hardware/README.md) 和 [硬件源文件](PCB/dual-mode-uart-enhanced_v0.8.dsn)。
 
 ## 参与贡献
 
