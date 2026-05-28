@@ -95,15 +95,34 @@ bool matchesLegacyDynamicWifiConfig(const char *ssidValue, const char *passwordV
   return strcmp(ssidValue, legacySsid) == 0 && strcmp(passwordValue, legacyPassword) == 0;
 }
 
+bool looksLikeLegacyDynamicWifiConfig(const char *ssidValue, const char *passwordValue, const String &ssidPrefix) {
+  if (matchesLegacyDynamicWifiConfig(ssidValue, passwordValue, ssidPrefix)) {
+    return true;
+  }
+
+  if (ssidValue == NULL || passwordValue == NULL) {
+    return false;
+  }
+
+  String ssid = String(ssidValue);
+  String password = String(passwordValue);
+
+  return ssid.startsWith(ssidPrefix) &&
+         ssid.length() > ssidPrefix.length() &&
+         password.startsWith("ESP32#") &&
+         password.endsWith("!") &&
+         validateWiFiPasswordValue(password, false);
+}
+
 bool migrateLegacyDefaultWiFiConfig() {
   bool migrated = false;
 
-  if (matchesLegacyDynamicWifiConfig(ap_ssid, ap_password, "ESP32_UART_")) {
+  if (looksLikeLegacyDynamicWifiConfig(ap_ssid, ap_password, "ESP32_UART_")) {
     applyDefaultServerAccessPointConfig(ap_ssid, sizeof(ap_ssid), ap_password, sizeof(ap_password));
     migrated = true;
   }
 
-  if (matchesLegacyDynamicWifiConfig(client_wifi_ssid, client_wifi_password, "ESP32_UART_")) {
+  if (looksLikeLegacyDynamicWifiConfig(client_wifi_ssid, client_wifi_password, "ESP32_UART_")) {
     copyStringToBuffer(String(DEFAULT_SERVER_AP_SSID), client_wifi_ssid, sizeof(client_wifi_ssid));
     copyStringToBuffer(String(DEFAULT_SERVER_AP_PASSWORD), client_wifi_password, sizeof(client_wifi_password));
     migrated = true;
