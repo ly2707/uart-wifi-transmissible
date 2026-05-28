@@ -74,6 +74,10 @@ void recordSecuritySuccess(SecurityState &state) {
 }
 
 bool isAllowedFrameCharacter(char value) {
+  if (rawTransmitMode) {
+    return value != '\0';
+  }
+
   if (value == '\r' || value == '\n' || value == '\t') {
     return true;
   }
@@ -82,6 +86,10 @@ bool isAllowedFrameCharacter(char value) {
 }
 
 bool isAllowedPayloadCharacter(char value) {
+  if (rawTransmitMode) {
+    return value != '\0';
+  }
+
   if (value == '\r' || value == '\n' || value == '\t') {
     return true;
   }
@@ -232,6 +240,10 @@ bool validateTransparentPayload(const String &payload, String &errorReason) {
       errorReason = "payload contains illegal character";
       return false;
     }
+  }
+
+  if (rawTransmitMode) {
+    return true;
   }
 
   if (payloadContainsBlockedToken(payload)) {
@@ -431,8 +443,38 @@ bool getValidatedPayload(SecurityInputSource source, int clientIndex, String &pa
     buffer->remove(0, headerPos);
   }
 
-  int tailPos = buffer->indexOf(SECURITY_FRAME_TAIL_CHAR, 1);
-  if (tailPos < 0) {
+  int separatorPos = buffer->indexOf(SECURITY_FRAME_SEPARATOR_CHAR, 1);
+  if (separatorPos <= 1) {
+    return false;
+  }
+
+  String lengthToken = buffer->substring(1, separatorPos);
+  for (unsigned int i = 0; i < lengthToken.length(); i++) {
+    if (!isAsciiDigitChar(lengthToken[i])) {
+      *buffer = "";
+      recordSecurityFailure(*state);
+      errorReason = "frame length field invalid";
+      return false;
+    }
+  }
+
+  int expectedLength = lengthToken.toInt();
+  if (expectedLength <= 0 || expectedLength > SECURITY_MAX_TRANSPARENT_PAYLOAD) {
+    *buffer = "";
+    recordSecurityFailure(*state);
+    errorReason = "frame payload length out of range";
+    return false;
+  }
+
+  int tailPos = separatorPos + expectedLength + 1;
+  if (buffer->length() <= tailPos) {
+    return false;
+  }
+
+  if ((*buffer)[tailPos] != SECURITY_FRAME_TAIL_CHAR) {
+    *buffer = "";
+    recordSecurityFailure(*state);
+    errorReason = "frame boundary invalid";
     return false;
   }
 
