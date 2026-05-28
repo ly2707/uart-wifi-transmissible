@@ -169,7 +169,7 @@ const unsigned long configModeTimeout = 300000; // 5分钟超时
 String usbRxBuffer = "";
 
 // RAW透传模式
-bool rawTransmitMode = false;
+bool rawTransmitMode = true;
 
 // LED状态枚举
 enum LEDState {
@@ -217,6 +217,8 @@ bool debugMode = false;             // 默认关闭debug模式
 WiFiClient serverClients[MAX_CLIENTS];
 String clientSerialData[MAX_CLIENTS];  // 存储每个客户端的实时串口数据
 String clientLineBuffer[MAX_CLIENTS];  // 客户端日志行缓冲
+String connectedClientIds[MAX_CLIENTS];
+unsigned long clientLastSeenMillis[MAX_CLIENTS] = {0};
 
 // SD卡状态
 bool sdCardReady = false;
@@ -322,6 +324,10 @@ String urlDecode(String input);
 // 智能配网
 void startConfigMode();
 void configModeCallback(WiFiManager *myWiFiManager);
+bool isServerAccessPointHealthy();
+String getWiFiStatusName(wl_status_t status);
+String getWiFiModeName(wifi_mode_t mode);
+bool hasClientSlotData(int clientIndex);
 
 // 客户端模式
 void initClientMode();
