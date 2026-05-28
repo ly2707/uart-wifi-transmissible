@@ -441,6 +441,11 @@ void handleLogsPage(WiFiClient client, String request) {
 }
 
 void handleStatusPage(WiFiClient client) {
+  wl_status_t wifiStatus = WiFi.status();
+  wifi_mode_t wifiMode = WiFi.getMode();
+  bool apHealthy = isServerAccessPointHealthy();
+  unsigned long now = millis();
+
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
@@ -480,16 +485,32 @@ void handleStatusPage(WiFiClient client) {
   html += "<div class='status'>";
   html += "<h2>WiFi_InFo</h2>";
   html += "<strong>连接状态:</strong> " + String(wifiConnected ? "已连接" : "未连接") + "<br>";
+  html += "<strong>WiFi模式:</strong> " + getWiFiModeName(wifiMode) + "<br>";
   if (wifiConnected) {
     if (currentMode == MODE_SERVER) {
+      html += "<strong>AP健康状态:</strong> " + String(apHealthy ? "正常" : "异常") + "<br>";
       html += "<strong>AP SSID:</strong> " + maskSensitiveValue(ap_ssid) + "<br>";
       html += "<strong>AP 地址:</strong> " + maskIpAddress(WiFi.softAPIP()) + "<br>";
       html += "<strong>连接设备数:</strong> " + String(WiFi.softAPgetStationNum()) + "<br>";
+      html += "<strong>TCP监听端口:</strong> " + String(server_listen_port) + "<br>";
     } else {
+      html += "<strong>WiFi链路:</strong> " + getWiFiStatusName(wifiStatus) + " (" + String((int)wifiStatus) + ")<br>";
+      html += "<strong>TCP链路:</strong> " + String(tcpConnected ? "已连接" : "未连接") + "<br>";
       html += "<strong>SSID:</strong> " + maskSensitiveValue(client_wifi_ssid) + "<br>";
       html += "<strong>IP地址:</strong> " + maskIpAddress(WiFi.localIP()) + "<br>";
       html += "<strong>信号强度:</strong> " + String(WiFi.RSSI()) + " dBm<br>";
+      html += "<strong>网关:</strong> " + maskIpAddress(WiFi.gatewayIP()) + "<br>";
     }
+  } else if (currentMode == MODE_CLIENT) {
+    html += "<strong>WiFi链路:</strong> " + getWiFiStatusName(wifiStatus) + " (" + String((int)wifiStatus) + ")<br>";
+    html += "<strong>目标SSID:</strong> " + maskSensitiveValue(client_wifi_ssid) + "<br>";
+    html += "<strong>目标服务端:</strong> " + String(server_ip) + ":" + String(server_port) + "<br>";
+    html += "<strong>TCP链路:</strong> " + String(tcpConnected ? "已连接" : "未连接") + "<br>";
+  } else {
+    html += "<strong>AP健康状态:</strong> " + String(apHealthy ? "正常" : "异常") + "<br>";
+    html += "<strong>AP SSID:</strong> " + maskSensitiveValue(ap_ssid) + "<br>";
+    html += "<strong>AP 地址:</strong> " + maskIpAddress(WiFi.softAPIP()) + "<br>";
+    html += "<strong>TCP监听端口:</strong> " + String(server_listen_port) + "<br>";
   }
   html += "</div>";
   
@@ -527,13 +548,30 @@ void handleStatusPage(WiFiClient client) {
     html += "<div class='status'>";
     html += "<h2>客户端连接</h2>";
     html += "<strong>当前连接数:</strong> " + String(clientCount) + "<br>";
+    bool hasVisibleSlot = false;
     for (int i = 0; i < MAX_CLIENTS; i++) {
-      if (serverClients[i] && serverClients[i].connected()) {
-        html += "<a href='/client?client_id=" + String(i) + "' style='display:inline-block;padding:8px 12px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;margin:5px 0;'>";
-        html += "客户端 " + String(i) + ": " + maskIpAddress(serverClients[i].remoteIP()) + " → 点击查看数据</a><br>";
+      bool clientOnline = serverClients[i] && serverClients[i].connected();
+      bool hasHistory = hasClientSlotData(i);
+      if (clientOnline || hasHistory) {
+        hasVisibleSlot = true;
+        String clientName = connectedClientIds[i].length() > 0 ? connectedClientIds[i] : ("client_" + String(i));
+        String statusColor = clientOnline ? "#4CAF50" : "#9E9E9E";
+        String statusText = clientOnline ? "在线" : "离线缓存";
+        html += "<div style='margin:8px 0;padding:10px;border:1px solid #ddd;border-radius:6px;'>";
+        html += "<strong>槽位 " + String(i) + "</strong> <span style='color:" + statusColor + ";'>" + statusText + "</span><br>";
+        html += "<strong>客户端ID:</strong> " + clientName + "<br>";
+        if (clientOnline) {
+          html += "<strong>IP:</strong> " + maskIpAddress(serverClients[i].remoteIP()) + "<br>";
+        }
+        if (clientLastSeenMillis[i] > 0 && now >= clientLastSeenMillis[i]) {
+          html += "<strong>最近活动:</strong> " + String((now - clientLastSeenMillis[i]) / 1000) + " 秒前<br>";
+        }
+        html += "<strong>缓存长度:</strong> " + String(clientSerialData[i].length()) + " 字符<br>";
+        html += "<a href='/client?client_id=" + String(i) + "' style='display:inline-block;padding:8px 12px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;margin:5px 0;'>查看该客户端数据</a>";
+        html += "</div>";
       }
     }
-    if (clientCount == 0) {
+    if (!hasVisibleSlot) {
       html += "<em>暂无客户端连接</em><br>";
     }
     html += "</div>";
@@ -569,14 +607,25 @@ void handleClientPage(WiFiClient client, String request) {
     }
     return;
   }
+
+  bool clientOnline = clientIdx >= 0 && clientIdx < MAX_CLIENTS && serverClients[clientIdx] && serverClients[clientIdx].connected();
+  bool hasHistory = hasClientSlotData(clientIdx);
   
   // 检查客户端是否有效
-  if (clientIdx < 0 || clientIdx >= MAX_CLIENTS || !serverClients[clientIdx] || !serverClients[clientIdx].connected()) {
+  if (clientIdx < 0 || clientIdx >= MAX_CLIENTS || (!clientOnline && !hasHistory)) {
     client.println("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n");
     client.print("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>");
     client.print("<h1>客户端不存在或已断开</h1>");
     client.print("<a href='/'>返回首页</a></body></html>");
     return;
+  }
+
+  String displayClientId = connectedClientIds[clientIdx].length() > 0 ? connectedClientIds[clientIdx] : ("client_" + String(clientIdx));
+  String connectionState = clientOnline ? "在线" : "离线缓存";
+  String remoteAddress = clientOnline ? maskIpAddress(serverClients[clientIdx].remoteIP()) : "--";
+  String lastSeenText = "--";
+  if (clientLastSeenMillis[clientIdx] > 0 && millis() >= clientLastSeenMillis[clientIdx]) {
+    lastSeenText = String((millis() - clientLastSeenMillis[clientIdx]) / 1000) + " 秒前";
   }
   
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
@@ -609,12 +658,15 @@ void handleClientPage(WiFiClient client, String request) {
   html += "</style></head><body>";
   html += "<div class='header'>";
   html += "<h1>🖥️ 客户端 " + String(clientIdx) + " - 串口数据</h1>";
-  html += "<div class='header-info'>终端: " + maskIpAddress(serverClients[clientIdx].remoteIP()) + " | 波特率: " + String(uart2BaudRate) + "</div>";
+  html += "<div class='header-info'>状态: " + connectionState + " | 客户端ID: " + displayClientId + " | 终端: " + remoteAddress + " | 最近活动: " + lastSeenText + " | 波特率: " + String(uart2BaudRate) + "</div>";
   html += "</div>";
   html += "<div class='serial-container'>";
   String initData = filterAnsiEscape(clientSerialData[clientIdx]);
   html += "<textarea class='serial-output' id='serialData' readonly>" + initData + "</textarea>";
   html += "</div>";
+  if (!clientOnline) {
+    html += "<div style='background:#5c4b1f;color:#ffe082;padding:8px 12px;font-size:12px;'>当前客户端已离线，页面显示的是服务端缓存的最近串口数据。</div>";
+  }
   html += "<div class='input-area'>";
   html += "<input type='text' id='serialInput' placeholder='输入命令...' autocomplete='off'>";
   html += "<label style='color:#fff;font-size:12px;white-space:nowrap;'><input type='checkbox' id='addCr' style='margin-right:4px;'>CR(\\r)</label>";

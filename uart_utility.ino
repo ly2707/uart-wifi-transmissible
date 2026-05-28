@@ -159,11 +159,42 @@ void handleCommand(String command) {
   } else if (command == "AT+RESET") {
     resetToDefault();
   } else if (command == "AT+STATUS") {
+    wl_status_t wifiStatus = WiFi.status();
+    wifi_mode_t wifiMode = WiFi.getMode();
+    String tcpStatusText = currentMode == MODE_CLIENT
+      ? String(tcpConnected ? "Connected" : "Disconnected")
+      : String(getConnectedClientCount() > 0 ? "Clients Connected" : "Listening");
+
     Serial.println("\nSystem Status:");
     Serial.println("  Mode: " + String(currentMode == MODE_CLIENT ? "Client" : "Server"));
     Serial.println("  Config Mode: " + String(inConfigMode ? "Yes" : "No"));
+    Serial.println("  RAW Pass-through: " + String(rawTransmitMode ? "Enabled" : "Disabled"));
     Serial.println("  WiFi: " + String(wifiConnected ? "Connected" : "Disconnected"));
-    Serial.println("  TCP: " + String(tcpConnected ? "Connected" : "Disconnected"));
+    Serial.println("  WiFi Mode: " + getWiFiModeName(wifiMode));
+    if (currentMode == MODE_CLIENT) {
+      Serial.println("  WiFi Link: " + getWiFiStatusName(wifiStatus) + " (" + String((int)wifiStatus) + ")");
+      Serial.println("  Target SSID: " + maskSensitiveValue(client_wifi_ssid));
+      Serial.println("  Target Server: " + String(server_ip) + ":" + String(server_port));
+      if (wifiStatus == WL_CONNECTED) {
+        Serial.println("  Local IP: " + WiFi.localIP().toString());
+        Serial.println("  Gateway: " + WiFi.gatewayIP().toString());
+        Serial.println("  RSSI: " + String(WiFi.RSSI()) + " dBm");
+      }
+    } else {
+      Serial.println("  AP Health: " + String(isServerAccessPointHealthy() ? "Healthy" : "Fault"));
+      Serial.println("  AP SSID: " + maskSensitiveValue(ap_ssid));
+      Serial.println("  AP IP: " + WiFi.softAPIP().toString());
+      Serial.println("  Stations: " + String(WiFi.softAPgetStationNum()));
+      Serial.println("  TCP Listen: " + String(server_listen_port));
+      Serial.println("  TCP Clients: " + String(getConnectedClientCount()));
+      for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (serverClients[i] && serverClients[i].connected()) {
+          String clientName = connectedClientIds[i].length() > 0 ? connectedClientIds[i] : ("client_" + String(i));
+          Serial.println("    Slot " + String(i) + ": " + clientName + " @ " + serverClients[i].remoteIP().toString());
+        }
+      }
+    }
+    Serial.println("  TCP: " + tcpStatusText);
     Serial.println("  SD Card: " + String(sdCardReady ? "Ready" : "Not Ready"));
     Serial.println("  Log: " + logFileName + " (" + String(logCount) + " entries)");
     Serial.println("  Log Timestamp: " + String(logWithTimestamp ? "ON" : "OFF"));
@@ -219,12 +250,12 @@ void handleCommand(String command) {
     Serial.println("System will restart...");
     ESP.restart();
   } else if (command == "AT+RAW") {
-    rawTransmitMode = false;
-    Serial.println("X RAW mode disabled by security policy; use secure frames instead");
+    rawTransmitMode = true;
+    Serial.println("OK RAW mode enabled - transparent TCP/UART payload filtering disabled");
   } else if (command == "AT+EXIT" || command == "+++") {
     if (rawTransmitMode) {
       rawTransmitMode = false;
-      Serial.println("OK RAW mode disabled - back to command mode");
+      Serial.println("OK RAW mode disabled - secure filtering restored");
     } else {
       Serial.println("OK Not in RAW mode");
     }
@@ -486,9 +517,11 @@ void printHelp() {
   Serial.println("  AT+BAUD1 <rate> - Set UART1 baud rate (IO19/IO20)");
   Serial.println("  AT+DEBUG=ON/OFF - Enable/disable debug mode");
   Serial.println("  AT+RESTART      - Restart system");
+  Serial.println("  AT+RAW          - Enable RAW transparent mode");
+  Serial.println("  AT+EXIT / +++   - Disable RAW mode and restore secure filtering");
   Serial.println("  AT+CONFIG       - Enter WiFi config mode (non-blocking)");
   Serial.println("  AT+EXITCONFIG   - Exit WiFi config mode");
-  Serial.println("  Transparent data: send @<len>:<payload># secure frames only");
+  Serial.println("  Transparent data: RAW pass-through is enabled by default for TCP/UART traffic");
   Serial.println("  AT+POWER=ON     - Power ON operation");
   Serial.println("  AT+POWER=OFF    - Power OFF operation");
   Serial.println("  AT+POWER=TRIGGER - Trigger shutdown hint");
