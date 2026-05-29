@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiServer.h>
+#include <DNSServer.h>
 #include <WiFiManager.h>  // 智能配网
 #include <EEPROM.h>
 #include <SD.h>
@@ -192,10 +193,12 @@ LEDState previousLEDState = LED_OFF;
 // 网络相关
 WiFiClient tcpClient;
 WiFiServer tcpServer(server_listen_port);
+DNSServer captiveDnsServer;
 WiFiManager wm;
 bool wifiConnected = false;
 bool tcpConnected = false;
 bool configMode = false;
+bool captiveDnsServerEnabled = false;
 
 // Web服务器（日志查看）
 WiFiServer webServer(80);
@@ -325,6 +328,8 @@ String urlDecode(String input);
 void startConfigMode();
 void configModeCallback(WiFiManager *myWiFiManager);
 bool isServerAccessPointHealthy();
+void startCaptivePortalDNS(IPAddress apAddress);
+void stopCaptivePortalDNS();
 String getWiFiStatusName(wl_status_t status);
 String getWiFiModeName(wifi_mode_t mode);
 bool hasClientSlotData(int clientIndex);

@@ -17,6 +17,32 @@ bool isServerAccessPointHealthy() {
   return apModeActive && apAddress != IPAddress(0, 0, 0, 0);
 }
 
+void stopCaptivePortalDNS() {
+  if (captiveDnsServerEnabled) {
+    captiveDnsServer.stop();
+    captiveDnsServerEnabled = false;
+  }
+}
+
+void startCaptivePortalDNS(IPAddress apAddress) {
+  stopCaptivePortalDNS();
+
+  if (apAddress == IPAddress(0, 0, 0, 0)) {
+    return;
+  }
+
+  captiveDnsServerEnabled = captiveDnsServer.start(53, "*", apAddress);
+
+  if (debugMode) {
+    if (captiveDnsServerEnabled) {
+      Serial.println("Captive DNS started");
+      Serial.println("  Redirect IP: " + apAddress.toString());
+    } else {
+      Serial.println("Captive DNS failed to start");
+    }
+  }
+}
+
 String getWiFiStatusName(wl_status_t status) {
   switch (status) {
     case (wl_status_t)254:
@@ -235,6 +261,8 @@ void initClientMode() {
     Serial.println("Initializing client mode...");
   }
 
+  stopCaptivePortalDNS();
+
   pinMode(CONFIG_MODE_PIN, INPUT_PULLUP);
   if (digitalRead(CONFIG_MODE_PIN) == LOW) {
     if (debugMode) {
@@ -408,6 +436,8 @@ void initServerMode() {
     Serial.println("Initializing server mode...");
   }
 
+  stopCaptivePortalDNS();
+
   delay(200);
 
   WiFi.mode(WIFI_AP);
@@ -421,6 +451,7 @@ void initServerMode() {
 
   if (WiFi.softAP(ap_ssid, ap_password)) {
     wifiConnected = true;
+    startCaptivePortalDNS(WiFi.softAPIP());
     if (debugMode) {
       Serial.println("WiFi AP started");
     }
@@ -471,6 +502,7 @@ void runServerMode() {
         serverRecoveryFailures++;
       }
 
+      stopCaptivePortalDNS();
       WiFi.softAPdisconnect(true);
       WiFi.mode(WIFI_OFF);
       delay(100);
