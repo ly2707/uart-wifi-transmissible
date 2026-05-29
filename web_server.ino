@@ -10,6 +10,37 @@ void initWebServer() {
   }
 }
 
+String getCaptivePortalUrl() {
+  IPAddress apAddress = WiFi.softAPIP();
+  if (apAddress == IPAddress(0, 0, 0, 0)) {
+    apAddress = IPAddress(192, 168, 1, 1);
+  }
+  return "http://" + apAddress.toString() + "/";
+}
+
+bool isCaptivePortalProbeRequest(const String &requestLine) {
+  return requestLine.indexOf("GET /generate_204") >= 0 ||
+         requestLine.indexOf("GET /gen_204") >= 0 ||
+         requestLine.indexOf("GET /fwlink") >= 0 ||
+         requestLine.indexOf("GET /ncsi.txt") >= 0 ||
+         requestLine.indexOf("GET /redirect") >= 0 ||
+         requestLine.indexOf("GET /hotspot-detect.html") >= 0 ||
+         requestLine.indexOf("GET /connecttest.txt") >= 0 ||
+         requestLine.indexOf("GET /success.txt") >= 0 ||
+         requestLine.indexOf("GET /library/test/success.html") >= 0;
+}
+
+void handleCaptivePortalRedirect(WiFiClient client) {
+  String redirectUrl = getCaptivePortalUrl();
+  client.println("HTTP/1.1 302 Found");
+  client.println("Location: " + redirectUrl);
+  client.println("Cache-Control: no-store, no-cache, must-revalidate");
+  client.println("Pragma: no-cache");
+  client.println("Connection: close");
+  client.println("Content-Length: 0");
+  client.println();
+}
+
 void handleWebServer() {
   if (!webServerEnabled) return;
 
@@ -98,21 +129,8 @@ void handleWebServer() {
   } else if (requestLine.indexOf("GET /favicon") >= 0) {
     client.println("HTTP/1.1 204 No Content");
     client.println();
-  } else if (requestLine.indexOf("GET /hotspot-detect.html") >= 0 || requestLine.indexOf("GET /connecttest.txt") >= 0) {
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-Type: text/html");
-    client.println();
-    client.print("<!DOCTYPE html><html><head><script>window.location.href='http://192.168.1.1/';</script></head><body></body></html>");
-  } else if (requestLine.indexOf("GET /generate_204") >= 0 || requestLine.indexOf("GET /fwlink") >= 0) {
-    // Android/Windows Captive Portal
-    client.println("HTTP/1.1 204 No Content");
-    client.println();
-  } else if (requestLine.indexOf("GET /ncsi.txt") >= 0) {
-    // Windows Captive Portal
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-Type: text/plain");
-    client.println();
-    client.print("Microsoft Connect Test");
+  } else if (currentMode == MODE_SERVER && isServerAccessPointHealthy() && isCaptivePortalProbeRequest(requestLine)) {
+    handleCaptivePortalRedirect(client);
   } else if (requestLine.indexOf("GET /serial ") >= 0 || requestLine.indexOf("GET /serial") >= 0) {
     if (requestLine.indexOf("GET /serial/data") >= 0) {
       handleSerialDataAPI(client, requestLine);
@@ -147,6 +165,8 @@ void handleWebServer() {
     handleDeleteFile(client, request);
   } else if (requestLine.indexOf("POST /power") >= 0) {
     handlePowerControl(client, postBody);
+  } else if (currentMode == MODE_SERVER && isServerAccessPointHealthy() && requestLine.indexOf("GET /") >= 0) {
+    handleCaptivePortalRedirect(client);
   } else {
     handleNotFound(client);
   }
@@ -1268,7 +1288,40 @@ String getFormValue(const String &body, const String &key) {
   return urlDecode(body.substring(start, end));
 }
 
-// 处理日志预览（分页版本，流式读取避免栈溢出）
+unsigned long findPreviewPageStart(File &file, unsigned long boundaryOffset, int linesPerPage) {
+  unsigned long fileSize = file.size();
+  if (boundaryOffset > fileSize) {
+    boundaryOffset = fileSize;
+  }
+
+  if (boundaryOffset == 0 || fileSize == 0) {
+    return 0;
+  }
+
+  int newlineCount = 0;
+  unsigned long cursor = boundaryOffset;
+  unsigned long lastYield = millis();
+
+  while (cursor > 0) {
+    cursor--;
+    file.seek(cursor);
+    if (file.read() == '\n') {
+      newlineCount++;
+      if (newlineCount > linesPerPage) {
+        return cursor + 1;
+      }
+    }
+
+    if (millis() - lastYield > 20) {
+      yield();
+      lastYield = millis();
+    }
+  }
+
+  return 0;
+}
+
+// 处理日志预览（按偏移分页，避免统计整文件行数）
 void handlePreviewLog(WiFiClient client, String request) {
   int fileStart = request.indexOf("file=") + 5;
   int fileEnd = request.indexOf("&", fileStart);
@@ -1301,62 +1354,54 @@ void handlePreviewLog(WiFiClient client, String request) {
     return;
   }
   
-  int page = -1;
-  int pagePos = request.indexOf("page=");
-  if (pagePos >= 0) {
-    pagePos += 5;
-    int pageEnd = request.indexOf("&", pagePos);
-    int pageSpaceEnd = request.indexOf(" ", pagePos);
-    if (pageEnd == -1 || (pageSpaceEnd != -1 && pageSpaceEnd < pageEnd)) {
-      pageEnd = pageSpaceEnd;
-    }
-    if (pageEnd == -1) pageEnd = request.length();
-    String pageStr = request.substring(pagePos, pageEnd);
-    page = pageStr.toInt();
-    if (page < 1) page = 1;
-  }
-  
   const int linesPerPage = 100;
+  bool hasStartOffset = false;
+  unsigned long requestedStartOffset = 0;
+  int startPos = request.indexOf("start=");
+  if (startPos >= 0) {
+    startPos += 6;
+    int startEnd = request.indexOf("&", startPos);
+    int startSpaceEnd = request.indexOf(" ", startPos);
+    if (startEnd == -1 || (startSpaceEnd != -1 && startSpaceEnd < startEnd)) {
+      startEnd = startSpaceEnd;
+    }
+    if (startEnd == -1) startEnd = request.length();
+
+    String startStr = request.substring(startPos, startEnd);
+    startStr.trim();
+    if (startStr.length() > 0) {
+      requestedStartOffset = strtoul(startStr.c_str(), NULL, 10);
+      hasStartOffset = true;
+    }
+  }
   
   File file = SD.open(filePath);
   if (file) {
     String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
     unsigned long fileSize = file.size();
-    
-    int totalLines = 0;
-    unsigned long lastYield = millis();
-    while (file.available()) {
-      if (file.read() == '\n') totalLines++;
-      if (millis() - lastYield > 20) {
-        yield();
-        lastYield = millis();
+    unsigned long currentStartOffset = 0;
+
+    if (hasStartOffset) {
+      if (requestedStartOffset >= fileSize && fileSize > 0) {
+        currentStartOffset = findPreviewPageStart(file, fileSize, linesPerPage);
+      } else {
+        currentStartOffset = requestedStartOffset;
       }
+    } else {
+      currentStartOffset = findPreviewPageStart(file, fileSize, linesPerPage);
     }
-    if (fileSize > 0) totalLines++;
-    
-    int totalPages = (totalLines + linesPerPage - 1) / linesPerPage;
-    if (totalPages < 1) totalPages = 1;
-    
-    if (page < 0) page = totalPages;
-    if (page > totalPages) page = totalPages;
-    
-    int startLine = (page - 1) * linesPerPage;
-    
-    file.seek(0);
-    int currentLine = 0;
-    unsigned long lastYield2 = millis();
-    while (file.available() && currentLine < startLine) {
-      if (file.read() == '\n') currentLine++;
-      if (millis() - lastYield2 > 20) {
-        yield();
-        lastYield2 = millis();
-      }
+
+    unsigned long previousPageStart = 0;
+    bool hasPreviousPage = currentStartOffset > 0;
+    if (hasPreviousPage) {
+      previousPageStart = findPreviewPageStart(file, currentStartOffset, linesPerPage);
     }
-    
-    unsigned long pageStartPos = file.position();
-    
+
+    file.seek(currentStartOffset);
+
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/html");
+    client.println("Connection: close");
     client.println();
     
     client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
@@ -1391,26 +1436,9 @@ void handlePreviewLog(WiFiClient client, String request) {
     client.println("<div class='info'>");
     client.println("<strong>路径:</strong> " + filePath + "<br>");
     client.println("<strong>大小:</strong> " + formatFileSize(fileSize) + "<br>");
-    client.println("<strong>总行数:</strong> " + String(totalLines) + " 行<br>");
-    client.println("<strong>当前页:</strong> " + String(page) + " / " + String(totalPages) + " 页");
+    client.println("<strong>分页:</strong> 每页最多 " + String(linesPerPage) + " 行<br>");
+    client.println("<strong>当前位置:</strong> 偏移 " + String(currentStartOffset) + " 字节");
     client.println("</div>");
-    
-    client.println("<div class='pagination'>");
-    client.println("<a href='/preview?file=" + filePath + "&page=1'>&laquo; 首页</a>");
-    if (page > 1) {
-      client.println("<a href='/preview?file=" + filePath + "&page=" + String(page - 1) + "'>&lsaquo; 上页</a>");
-    } else {
-      client.println("<button disabled>&lsaquo; 上页</button>");
-    }
-    client.println("<span class='page-info'>第 <input type='number' id='pageInput' value='" + String(page) + "' min='1' max='" + String(totalPages) + "' onchange='gotoPage()'> / " + String(totalPages) + " 页</span>");
-    if (page < totalPages) {
-      client.println("<a href='/preview?file=" + filePath + "&page=" + String(page + 1) + "'>下页 &rsaquo;</a>");
-    } else {
-      client.println("<button disabled>下页 &rsaquo;</button>");
-    }
-    client.println("<a href='/preview?file=" + filePath + "&page=" + String(totalPages) + "'>尾页 &raquo;</a>");
-    client.println("</div>");
-    client.println("<script>function gotoPage(){var p=parseInt(document.getElementById('pageInput').value);if(p>=1&&p<=" + String(totalPages) + "){window.location.href='/preview?file=" + filePath + "&page='+p;}}</script>");
     
     client.println("<div class='preview-box'>");
     
@@ -1430,7 +1458,25 @@ void handlePreviewLog(WiFiClient client, String request) {
         else client.print(c);
       }
     }
+
+    unsigned long nextPageStart = file.position();
+    bool hasNextPage = file.available();
     
+    client.println("</div>");
+    
+    client.println("<div class='pagination'>");
+    client.println("<a href='/preview?file=" + filePath + "&start=0'>&laquo; 首页</a>");
+    if (hasPreviousPage) {
+      client.println("<a href='/preview?file=" + filePath + "&start=" + String(previousPageStart) + "'>&lsaquo; 上页</a>");
+    } else {
+      client.println("<button disabled>&lsaquo; 上页</button>");
+    }
+    if (hasNextPage) {
+      client.println("<a href='/preview?file=" + filePath + "&start=" + String(nextPageStart) + "'>下页 &rsaquo;</a>");
+    } else {
+      client.println("<button disabled>下页 &rsaquo;</button>");
+    }
+    client.println("<a href='/preview?file=" + filePath + "'>尾页 &raquo;</a>");
     client.println("</div>");
     
     client.println("<div class='actions'>");
