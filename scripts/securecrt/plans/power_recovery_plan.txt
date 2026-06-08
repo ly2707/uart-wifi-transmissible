@@ -1,0 +1,16 @@
+# Power recovery plan, requires external power-control integration
+LOG_START@@C:\SecureCRTLogs\power_recovery_%TIMESTAMP%.log
+CHECK_LOGIN@@180
+HEALTH_CHECK
+RUN@@echo "===== POWER RECOVERY TEST START ====="@@10
+RUN@@date@@10
+RUN@@cat /proc/uptime@@10
+POWER_CYCLE@@8@@240
+HEALTH_CHECK
+RUN@@echo "===== AFTER POWER CYCLE ====="@@10
+RUN@@date@@10
+RUN@@uptime@@10
+RUN@@dmesg | tail -n 100@@30
+PING@@127.0.0.1@@10@@30
+RUN@@echo "===== POWER RECOVERY TEST END ====="@@10
+LOG_STOP

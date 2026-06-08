@@ -1,0 +1,31 @@
+# Combined regression plan covering web, network, stress and reboot checks
+LOG_START@@C:\SecureCRTLogs\full_regression_%TIMESTAMP%.log
+CHECK_LOGIN@@180
+HEALTH_CHECK
+RUN@@echo "===== PHASE 1: BASIC CHECK ====="@@10
+RUN@@date@@10
+RUN@@uname -a@@20
+RUN@@cat /etc/os-release 2>/dev/null || lsb_release -a 2>/dev/null@@20
+RUN@@uptime@@10
+RUN@@free -m@@10
+RUN@@df -h@@15
+PING@@127.0.0.1@@10@@30
+RUN@@echo "===== PHASE 2: WEB CHECK ====="@@10
+HTTP_GET@@http://192.168.4.1/@@html
+HTTP_GET@@http://192.168.4.1/status@@status
+RUN@@echo "===== PHASE 3: NETWORK RECOVERY ====="@@10
+RUN@@ip link set eth0 down@@15
+WAIT@@10
+RUN@@ip link set eth0 up@@15
+WAIT@@15
+RUN@@dhclient eth0 || udhcpc -i eth0 || true@@60
+PING@@192.168.1.1@@20@@60
+RUN@@echo "===== PHASE 4: CPU MEM STRESS ====="@@10
+STRESS_CPU@@600
+RUN@@echo "===== PHASE 5: REBOOT LOOP ====="@@10
+REBOOT_LOOP@@20@@180
+RUN@@echo "===== PHASE 6: POWER RECOVERY ====="@@10
+POWER_CYCLE@@8@@240
+RUN@@echo "===== PHASE 7: FINAL HEALTH CHECK ====="@@10
+HEALTH_CHECK
+LOG_STOP

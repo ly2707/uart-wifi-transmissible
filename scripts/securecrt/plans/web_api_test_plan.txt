@@ -1,0 +1,12 @@
+# Replace URLs with your real device address before use
+LOG_START@@C:\SecureCRTLogs\web_api_test_%TIMESTAMP%.log
+CHECK_LOGIN@@180
+HEALTH_CHECK
+RUN@@echo "===== WEB API TEST START ====="@@10
+HTTP_GET@@http://192.168.4.1/@@html
+HTTP_GET@@http://192.168.4.1/status@@status
+HTTP_GET@@http://192.168.4.1/config@@config
+RUN@@curl -L --max-time 10 http://192.168.4.1/ || wget -O - http://192.168.4.1/@@30
+RUN@@curl -L --max-time 10 http://192.168.4.1/status || wget -O - http://192.168.4.1/status@@30
+RUN@@echo "===== WEB API TEST END ====="@@10
+LOG_STOP

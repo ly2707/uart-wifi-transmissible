@@ -1,0 +1,15 @@
+# Reboot stability plan for D3000 target over SecureCRT
+LOG_START@@C:\SecureCRTLogs\reboot_stability_%TIMESTAMP%.log
+CHECK_LOGIN@@180
+HEALTH_CHECK
+RUN@@echo "===== REBOOT STABILITY TEST START ====="@@10
+RUN@@date@@10
+RUN@@uname -a@@20
+RUN@@uptime@@10
+RUN@@free -m@@10
+RUN@@df -h@@15
+PING@@127.0.0.1@@10@@30
+REBOOT_LOOP@@50@@180
+RUN@@echo "===== REBOOT STABILITY TEST END ====="@@10
+HEALTH_CHECK
+LOG_STOP

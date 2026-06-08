@@ -1,0 +1,18 @@
+# Replace eth0 and the target gateway address with your real values
+LOG_START@@C:\SecureCRTLogs\network_recovery_%TIMESTAMP%.log
+CHECK_LOGIN@@180
+HEALTH_CHECK
+RUN@@echo "===== NETWORK RECOVERY TEST START ====="@@10
+RUN@@ip addr@@20
+RUN@@ip route@@20
+PING@@192.168.1.1@@20@@60
+RUN@@ip link set eth0 down@@15
+WAIT@@10
+RUN@@ip link set eth0 up@@15
+WAIT@@15
+RUN@@dhclient eth0 || udhcpc -i eth0 || true@@60
+RUN@@ip addr show eth0@@20
+PING@@192.168.1.1@@20@@60
+RUN@@ping -c 10 8.8.8.8@@30
+RUN@@echo "===== NETWORK RECOVERY TEST END ====="@@10
+LOG_STOP

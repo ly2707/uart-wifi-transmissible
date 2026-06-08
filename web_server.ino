@@ -45,7 +45,7 @@ void handleWebServer() {
   if (!webServerEnabled) return;
 
   const size_t maxHeaderLength = 1024;
-  const size_t maxBodyLength = 1536;
+  const size_t maxBodyLength = 8192;
   
   WiFiClient client = webServer.available();
   if (!client) return;
@@ -155,6 +155,12 @@ void handleWebServer() {
     handleConfigPage(client);
   } else if (requestLine.indexOf("POST /saveconfig") >= 0) {
     handleSaveConfig(client, postBody);
+  } else if (requestLine.indexOf("GET /script") >= 0) {
+    handleScriptPage(client, requestLine);
+  } else if (requestLine.indexOf("POST /script/save") >= 0) {
+    handleScriptSave(client, postBody);
+  } else if (requestLine.indexOf("POST /script/run") >= 0) {
+    handleScriptRun(client, postBody);
   } else if (requestLine.indexOf("GET /download") >= 0) {
     handleDownloadLog(client, request);
   } else if (requestLine.indexOf("GET /clear ") >= 0) {
@@ -223,11 +229,13 @@ void handleRootPage(WiFiClient client) {
   html += "<a href='/logs'>📋 查看日志</a>";
   html += "<a href='/status'>📊 系统状态</a>";
   html += "<a href='/config'>⚙️ 系统配置</a>";
+  html += "<a href='/script'>🧠 脚本编程</a>";
   html += "</div>";
   
   // 电源控制
   html += "<div class='info'>";
-  html += "<h3>电源控制</h3>";
+  html += "<h3>本机电源控制</h3>";
+  html += "<div style='font-size:12px;color:#555;margin-bottom:8px;'>如需控制某个在线客户端，请先进入系统状态页，再打开对应客户端详情页中的远程控制按钮。</div>";
   html += "<div class='power-controls'>";
   html += "<form action='/power' method='post'>";
   html += "<input type='hidden' name='action' value='on'>";
@@ -686,6 +694,30 @@ void handleClientPage(WiFiClient client, String request) {
   html += "</div>";
   if (!clientOnline) {
     html += "<div style='background:#5c4b1f;color:#ffe082;padding:8px 12px;font-size:12px;'>当前客户端已离线，页面显示的是服务端缓存的最近串口数据。</div>";
+  } else {
+    html += "<div style='background:#1f3b24;color:#dcedc8;padding:8px 12px;font-size:12px;border-top:1px solid #335;'>可直接对该客户端下发远程电源控制指令，客户端收到后会执行本地 GPIO 电源/复位动作。</div>";
+    html += "<div style='background:#2d2d2d;padding:10px 12px;border-top:1px solid #444;display:flex;flex-wrap:wrap;gap:8px;'>";
+    html += "<form action='/power' method='post' style='margin:0;'>";
+    html += "<input type='hidden' name='client_id' value='" + String(clientIdx) + "'>";
+    html += "<input type='hidden' name='action' value='on'>";
+    html += "<input type='submit' value='远程开机' style='padding:8px 12px;background:#4CAF50;color:#fff;border:none;border-radius:4px;cursor:pointer;'>";
+    html += "</form>";
+    html += "<form action='/power' method='post' style='margin:0;'>";
+    html += "<input type='hidden' name='client_id' value='" + String(clientIdx) + "'>";
+    html += "<input type='hidden' name='action' value='off'>";
+    html += "<input type='submit' value='远程关机' style='padding:8px 12px;background:#f44336;color:#fff;border:none;border-radius:4px;cursor:pointer;'>";
+    html += "</form>";
+    html += "<form action='/power' method='post' style='margin:0;'>";
+    html += "<input type='hidden' name='client_id' value='" + String(clientIdx) + "'>";
+    html += "<input type='hidden' name='action' value='trigger'>";
+    html += "<input type='submit' value='远程触发关机' style='padding:8px 12px;background:#FF9800;color:#fff;border:none;border-radius:4px;cursor:pointer;'>";
+    html += "</form>";
+    html += "<form action='/power' method='post' style='margin:0;'>";
+    html += "<input type='hidden' name='client_id' value='" + String(clientIdx) + "'>";
+    html += "<input type='hidden' name='action' value='reset'>";
+    html += "<input type='submit' value='远程复位' style='padding:8px 12px;background:#2196F3;color:#fff;border:none;border-radius:4px;cursor:pointer;'>";
+    html += "</form>";
+    html += "</div>";
   }
   html += "<div class='input-area'>";
   html += "<input type='text' id='serialInput' placeholder='输入命令...' autocomplete='off'>";
@@ -1154,41 +1186,75 @@ void handleClearLog(WiFiClient client) {
 
 void handlePowerControl(WiFiClient client, String request) {
   String postData = request;
+  int clientId = -1;
+
+  String clientIdValue = getFormValue(postData, "client_id");
+  if (clientIdValue.length() > 0) {
+    clientId = clientIdValue.toInt();
+  }
 
   // 解析action参数
-  int actionIndex = postData.indexOf("action=");
-  if (actionIndex < 0) {
+  String action = getFormValue(postData, "action");
+  if (action.length() == 0) {
     client.println("HTTP/1.1 400 Bad Request");
     client.println("Content-Type: text/html");
     client.println();
     client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>400 - 参数错误</h1><p>缺少 action 参数</p><a href='/'>返回首页</a></body></html>");
     return;
   }
-  actionIndex += 7;
-  int actionEnd = postData.indexOf("&", actionIndex);
-  if (actionEnd == -1) actionEnd = postData.length();
-  String action = postData.substring(actionIndex, actionEnd);
   action.trim();
 
+  bool remoteTarget = clientId >= 0;
+  bool success = true;
+  String operationText = "";
+
   // 执行电源控制操作
-  if (action == "on") {
-    powerOn();
-  } else if (action == "off") {
-    powerOff();
-  } else if (action == "trigger") {
-    triggerShutdown();
-  } else if (action == "reset") {
-    resetCPU();
+  if (remoteTarget) {
+    String remoteAction = "";
+    if (action == "on") {
+      remoteAction = "POWER_ON";
+      operationText = "远程开机";
+    } else if (action == "off") {
+      remoteAction = "POWER_OFF";
+      operationText = "远程关机";
+    } else if (action == "trigger") {
+      remoteAction = "POWER_TRIGGER";
+      operationText = "远程触发关机";
+    } else if (action == "reset") {
+      remoteAction = "CPU_RESET";
+      operationText = "远程复位";
+    } else {
+      client.println("HTTP/1.1 400 Bad Request");
+      client.println("Content-Type: text/html");
+      client.println();
+      client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>400 - 参数错误</h1><p>未知 action: " + action + "</p><a href='/'>返回首页</a></body></html>");
+      return;
+    }
+    success = sendRemotePowerActionToClient(clientId, remoteAction, operationText);
   } else {
-    client.println("HTTP/1.1 400 Bad Request");
-    client.println("Content-Type: text/html");
-    client.println();
-    client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>400 - 参数错误</h1><p>未知 action: " + action + "</p><a href='/'>返回首页</a></body></html>");
-    return;
+    if (action == "on") {
+      powerOn();
+      operationText = "执行了本机开机操作";
+    } else if (action == "off") {
+      powerOff();
+      operationText = "执行了本机关机操作";
+    } else if (action == "trigger") {
+      triggerShutdown();
+      operationText = "执行了本机触发关机操作";
+    } else if (action == "reset") {
+      resetCPU();
+      operationText = "执行了本机复位操作";
+    } else {
+      client.println("HTTP/1.1 400 Bad Request");
+      client.println("Content-Type: text/html");
+      client.println();
+      client.println("<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><h1>400 - 参数错误</h1><p>未知 action: " + action + "</p><a href='/'>返回首页</a></body></html>");
+      return;
+    }
   }
 
   // 返回结果
-  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  String html = String(success ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 500 Internal Server Error\r\n") + "Content-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
   html += "<title>电源控制</title>";
@@ -1205,22 +1271,509 @@ void handlePowerControl(WiFiClient client, String request) {
   html += "</style></head><body>";
   html += "<div class='container'>";
   html += "<h1>电源控制</h1>";
-  html += "<div class='success'>";
-  html += "<strong>操作已执行</strong><br>";
-  if (action == "on") {
-    html += "执行了开机操作";
-  } else if (action == "off") {
-    html += "执行了关机操作";
-  } else if (action == "trigger") {
-    html += "执行了触发关机操作";
-  } else if (action == "reset") {
-    html += "执行了复位操作";
-  }
+  html += success ? "<div class='success'>" : "<div style='background:#ffebee;border-left:4px solid #f44336;padding:15px;margin:15px 0;font-size:16px;'>";
+  html += success ? "<strong>操作已执行</strong><br>" : "<strong>操作失败</strong><br>";
+  html += operationText;
   html += "</div>";
-  html += "<div class='back'><a href='/'>返回首页</a></div>";
+  if (remoteTarget) {
+    html += "<div class='back'><a href='/client?client_id=" + String(clientId) + "'>返回客户端详情</a></div>";
+  } else {
+    html += "<div class='back'><a href='/'>返回首页</a></div>";
+  }
   html += "</div>";
   html += "</body></html>";
   client.print(html);
+}
+
+String htmlEscape(const String &input) {
+  String escaped = "";
+  escaped.reserve(input.length() + 16);
+  for (unsigned int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if (c == '&') {
+      escaped += "&amp;";
+    } else if (c == '<') {
+      escaped += "&lt;";
+    } else if (c == '>') {
+      escaped += "&gt;";
+    } else if (c == '"') {
+      escaped += "&quot;";
+    } else if (c == '\'') {
+      escaped += "&#39;";
+    } else {
+      escaped += c;
+    }
+  }
+  return escaped;
+}
+
+String getQueryValue(const String &requestLine, const String &key) {
+  String lookup = key + "=";
+  int start = requestLine.indexOf(lookup);
+  if (start < 0) {
+    return "";
+  }
+
+  start += lookup.length();
+  int end = requestLine.indexOf("&", start);
+  int spaceEnd = requestLine.indexOf(" ", start);
+  if (end < 0 || (spaceEnd >= 0 && spaceEnd < end)) {
+    end = spaceEnd;
+  }
+  if (end < 0) {
+    end = requestLine.length();
+  }
+
+  return urlDecode(requestLine.substring(start, end));
+}
+
+bool ensureScriptDirectory() {
+  if (!sdCardReady) {
+    return false;
+  }
+
+  if (!SD.exists("/scripts")) {
+    return SD.mkdir("/scripts");
+  }
+  return true;
+}
+
+String sanitizeScriptName(String input) {
+  input.trim();
+  String result = "";
+  for (unsigned int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if ((c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '_' || c == '-' || c == '.') {
+      result += c;
+    } else if (c == ' ') {
+      result += '_';
+    }
+  }
+
+  if (result.length() == 0) {
+    result = "default.txt";
+  }
+  if (result.startsWith(".")) {
+    result = "script" + result;
+  }
+  if (result.indexOf("..") >= 0) {
+    result = "default.txt";
+  }
+  if (!result.endsWith(".txt")) {
+    result += ".txt";
+  }
+  if (result.length() > 48) {
+    result = result.substring(0, 48);
+  }
+  return result;
+}
+
+String buildScriptPath(const String &scriptName) {
+  return "/scripts/" + sanitizeScriptName(scriptName);
+}
+
+String defaultScriptTemplate() {
+  String content = "# Web script example\n";
+  content += "# SEND text to UART2 with LF\n";
+  content += "SEND AT+STATUS\n";
+  content += "WAIT 500\n";
+  content += "# SENDCRLF appends CRLF\n";
+  content += "SENDCRLF AT+CPU\n";
+  content += "# SENDRAW supports escape sequences like \\r and \\n\n";
+  content += "SENDRAW ping\\r\\n\n";
+  content += "# SENDU1 sends to UART1\n";
+  content += "SENDU1 debug-message\n";
+  content += "# SENDCLIENT <index> <text> targets a TCP client in server mode\n";
+  content += "# SENDCLIENT 0 hello-client\n";
+  content += "# POWER ON|OFF|TRIGGER|RESET\n";
+  content += "# POWER RESET\n";
+  return content;
+}
+
+String readScriptFileContent(const String &scriptPath) {
+  if (!sdCardReady || !SD.exists(scriptPath)) {
+    return "";
+  }
+
+  File file = SD.open(scriptPath);
+  if (!file) {
+    return "";
+  }
+
+  String content = "";
+  while (file.available()) {
+    content += (char)file.read();
+    yield();
+  }
+  file.close();
+  return content;
+}
+
+bool writeScriptFileContent(const String &scriptPath, const String &content) {
+  if (!ensureScriptDirectory()) {
+    return false;
+  }
+
+  if (SD.exists(scriptPath) && !SD.remove(scriptPath)) {
+    return false;
+  }
+
+  File file = SD.open(scriptPath, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+
+  size_t written = file.print(content);
+  file.close();
+  return written == content.length();
+}
+
+String buildScriptFileListHtml(const String &activeName) {
+  if (!sdCardReady || !ensureScriptDirectory()) {
+    return "<p>SD 卡未就绪，暂时无法列出已保存脚本。</p>";
+  }
+
+  File dir = SD.open("/scripts");
+  if (!dir || !dir.isDirectory()) {
+    if (dir) {
+      dir.close();
+    }
+    return "<p>脚本目录不可用。</p>";
+  }
+
+  String html = "<ul style='padding-left:18px;'>";
+  bool hasFile = false;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      hasFile = true;
+      String entryName = String(entry.name());
+      if (entryName.startsWith("/scripts/")) {
+        entryName = entryName.substring(9);
+      }
+      html += "<li>";
+      if (entryName == activeName) {
+        html += "<strong>" + htmlEscape(entryName) + "</strong>";
+      } else {
+        html += "<a href='/script?name=" + entryName + "'>" + htmlEscape(entryName) + "</a>";
+      }
+      html += " <a href='/download?file=/scripts/" + entryName + "'>下载</a></li>";
+    }
+    entry.close();
+    entry = dir.openNextFile();
+    yield();
+  }
+  dir.close();
+
+  if (!hasFile) {
+    html += "<li>当前还没有已保存脚本</li>";
+  }
+  html += "</ul>";
+  return html;
+}
+
+String decodeScriptEscapes(const String &input) {
+  String output = "";
+  output.reserve(input.length());
+  for (unsigned int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if (c == '\\' && i + 1 < input.length()) {
+      char next = input.charAt(i + 1);
+      if (next == 'r') {
+        output += '\r';
+        i++;
+      } else if (next == 'n') {
+        output += '\n';
+        i++;
+      } else if (next == 't') {
+        output += '\t';
+        i++;
+      } else if (next == '\\') {
+        output += '\\';
+        i++;
+      } else {
+        output += next;
+        i++;
+      }
+    } else {
+      output += c;
+    }
+  }
+  return output;
+}
+
+bool executeWebPayload(const String &rawData, bool targetUart1, int targetIndex, bool addCr, bool addLf, String &errorReason) {
+  String data = rawData;
+  bool explicitFrame = data.length() > 0 && data[0] == SECURITY_FRAME_HEADER_CHAR && data[data.length() - 1] == SECURITY_FRAME_TAIL_CHAR;
+  if (!explicitFrame) {
+    if (addCr) data += "\r";
+    if (addLf) data += "\n";
+  }
+
+  String payload = "";
+  String frame = explicitFrame ? data : buildSecureFrame(data);
+  webFrameBuffer = "";
+  bool payloadReady = frame.length() > 0 &&
+                      appendIngressChunk(SECURITY_SOURCE_WEB, -1, (const uint8_t *)frame.c_str(), frame.length(), errorReason) &&
+                      getValidatedPayload(SECURITY_SOURCE_WEB, -1, payload, errorReason);
+
+  if (!payloadReady || payload.length() == 0) {
+    if (errorReason.length() == 0) {
+      errorReason = "payload validation failed";
+    }
+    return false;
+  }
+
+  if (targetUart1) {
+    sendValidatedPayloadToUART(UART_NUM_1, payload);
+    return true;
+  }
+
+  if (targetIndex >= 0) {
+    if (currentMode == MODE_SERVER) {
+      if (targetIndex >= MAX_CLIENTS || !serverClients[targetIndex] || !serverClients[targetIndex].connected()) {
+        errorReason = "target client unavailable";
+        return false;
+      }
+      selectedClientIndex = targetIndex;
+      sendFramedPayloadToClient(serverClients[targetIndex], payload);
+      return true;
+    }
+  }
+
+  sendValidatedPayloadToUART(UART_NUM_2, payload);
+  return true;
+}
+
+void waitScriptDelay(unsigned long durationMs) {
+  unsigned long start = millis();
+  while (millis() - start < durationMs) {
+    delay(10);
+    yield();
+  }
+}
+
+void appendScriptRunLog(String &log, const String &line) {
+  if (log.length() < 6000) {
+    log += line + "\n";
+  }
+}
+
+bool executeScriptCommandLine(String line, String &runLog) {
+  line.trim();
+  if (line.length() == 0 || line.startsWith("#") || line.startsWith("//")) {
+    return true;
+  }
+
+  int spacePos = line.indexOf(' ');
+  String command = line;
+  String rest = "";
+  if (spacePos >= 0) {
+    command = line.substring(0, spacePos);
+    rest = line.substring(spacePos + 1);
+    rest.trim();
+  }
+  command.toUpperCase();
+
+  if (command == "WAIT") {
+    unsigned long waitMs = (unsigned long)rest.toInt();
+    appendScriptRunLog(runLog, "WAIT " + String(waitMs) + " ms");
+    waitScriptDelay(waitMs);
+    return true;
+  }
+
+  if (command == "POWER") {
+    String action = rest;
+    action.toUpperCase();
+    if (action == "ON") {
+      powerOn();
+    } else if (action == "OFF") {
+      powerOff();
+    } else if (action == "TRIGGER") {
+      triggerShutdown();
+    } else if (action == "RESET") {
+      resetCPU();
+    } else {
+      appendScriptRunLog(runLog, "ERROR unknown POWER action: " + rest);
+      return false;
+    }
+    appendScriptRunLog(runLog, "POWER " + action + " OK");
+    return true;
+  }
+
+  String errorReason = "";
+  if (command == "SEND" || command == "SENDRAW" || command == "SENDCRLF" ||
+      command == "SENDU1" || command == "SENDU1RAW" || command == "SENDU1CRLF") {
+    bool targetUart1 = command.startsWith("SENDU1");
+    bool addCr = (command.endsWith("CRLF"));
+    bool addLf = (command == "SEND" || command == "SENDU1" || command.endsWith("CRLF"));
+    if (command.endsWith("RAW")) {
+      addCr = false;
+      addLf = false;
+    }
+
+    if (!executeWebPayload(decodeScriptEscapes(rest), targetUart1, -1, addCr, addLf, errorReason)) {
+      appendScriptRunLog(runLog, "ERROR " + command + ": " + errorReason);
+      return false;
+    }
+    appendScriptRunLog(runLog, command + " OK");
+    return true;
+  }
+
+  if (command == "SENDCLIENT" || command == "SENDCLIENTRAW" || command == "SENDCLIENTCRLF") {
+    if (currentMode != MODE_SERVER) {
+      appendScriptRunLog(runLog, "ERROR SENDCLIENT only works in server mode");
+      return false;
+    }
+
+    int clientSep = rest.indexOf(' ');
+    if (clientSep < 0) {
+      appendScriptRunLog(runLog, "ERROR client index missing");
+      return false;
+    }
+
+    int clientIndex = rest.substring(0, clientSep).toInt();
+    String clientPayload = rest.substring(clientSep + 1);
+    clientPayload.trim();
+    bool addCr = command.endsWith("CRLF");
+    bool addLf = (command == "SENDCLIENT" || command.endsWith("CRLF"));
+    if (command.endsWith("RAW")) {
+      addCr = false;
+      addLf = false;
+    }
+
+    if (!executeWebPayload(decodeScriptEscapes(clientPayload), false, clientIndex, addCr, addLf, errorReason)) {
+      appendScriptRunLog(runLog, "ERROR " + command + ": " + errorReason);
+      return false;
+    }
+    appendScriptRunLog(runLog, command + " client=" + String(clientIndex) + " OK");
+    return true;
+  }
+
+  appendScriptRunLog(runLog, "ERROR unknown command: " + command);
+  return false;
+}
+
+bool executeWebScript(const String &scriptBody, String &runLog) {
+  String normalized = scriptBody;
+  normalized.replace("\r\n", "\n");
+  normalized.replace('\r', '\n');
+
+  int start = 0;
+  int lineNumber = 0;
+  while (start <= normalized.length()) {
+    int end = normalized.indexOf('\n', start);
+    String line = (end >= 0) ? normalized.substring(start, end) : normalized.substring(start);
+    lineNumber++;
+    String displayLine = line;
+    displayLine.trim();
+    if (displayLine.length() > 0 && !displayLine.startsWith("#") && !displayLine.startsWith("//")) {
+      appendScriptRunLog(runLog, "LINE " + String(lineNumber) + ": " + displayLine);
+      if (!executeScriptCommandLine(line, runLog)) {
+        appendScriptRunLog(runLog, "ABORT at line " + String(lineNumber));
+        return false;
+      }
+    }
+
+    if (end < 0) {
+      break;
+    }
+    start = end + 1;
+    yield();
+  }
+  appendScriptRunLog(runLog, "SCRIPT DONE");
+  return true;
+}
+
+void renderScriptPage(WiFiClient client, const String &scriptName, const String &scriptBody, const String &message, bool success, const String &runLog) {
+  String safeName = sanitizeScriptName(scriptName);
+  String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+  html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=yes'>";
+  html += "<title>脚本编程</title>";
+  html += "<style>body{font-family:Arial,sans-serif;margin:10px;background:#f5f5f5;font-size:14px;}";
+  html += ".container{max-width:960px;margin:0 auto;background:white;padding:14px;border-radius:10px;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.08);}";
+  html += "h1{color:#333;border-bottom:2px solid #4CAF50;padding-bottom:8px;font-size:18px;}";
+  html += ".grid{display:grid;grid-template-columns:1fr;gap:12px;}";
+  html += ".panel{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:12px;}";
+  html += ".hint{background:#eef7ff;border-left:4px solid #2196F3;padding:10px;margin:10px 0;}";
+  html += ".ok{background:#e8f5e9;border-left:4px solid #4CAF50;padding:10px;margin:10px 0;}";
+  html += ".err{background:#ffebee;border-left:4px solid #f44336;padding:10px;margin:10px 0;}";
+  html += "textarea{width:100%;min-height:320px;font-family:Consolas,monospace;font-size:13px;box-sizing:border-box;padding:10px;border:1px solid #ccc;border-radius:6px;}";
+  html += "input[type='text']{width:100%;padding:8px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px;}";
+  html += ".actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}";
+  html += ".actions button,.actions a{padding:9px 14px;border:none;border-radius:6px;background:#4CAF50;color:white;text-decoration:none;cursor:pointer;}";
+  html += ".actions button.secondary,.actions a.secondary{background:#607D8B;}";
+  html += "pre{white-space:pre-wrap;word-break:break-word;background:#111;color:#d7f7d7;padding:10px;border-radius:6px;max-height:260px;overflow:auto;}";
+  html += "code{background:#f0f0f0;padding:1px 4px;border-radius:4px;}";
+  html += "ul{margin:8px 0;}";
+  html += "@media screen and (min-width: 800px){.grid{grid-template-columns:2fr 1fr;}}";
+  html += "</style></head><body><div class='container'>";
+  html += "<h1>🧠 网页脚本编程</h1>";
+  html += "<div class='actions'><a href='/' class='secondary'>返回首页</a><a href='/serial' class='secondary'>串口监视器</a><a href='/logs' class='secondary'>日志中心</a></div>";
+
+  if (message.length() > 0) {
+    html += success ? "<div class='ok'>" : "<div class='err'>";
+    html += htmlEscape(message) + "</div>";
+  }
+
+  html += "<div class='grid'>";
+  html += "<div class='panel'>";
+  html += "<form method='post' action='/script/save'>";
+  html += "<label><strong>脚本文件名</strong></label>";
+  html += "<input type='text' name='name' value='" + htmlEscape(safeName) + "' maxlength='48'>";
+  html += "<div class='hint'><strong>支持命令</strong><br><code>SEND text</code>、<code>SENDRAW text</code>、<code>SENDCRLF text</code>、<code>SENDU1 text</code>、<code>SENDCLIENT idx text</code>、<code>WAIT ms</code>、<code>POWER ON|OFF|TRIGGER|RESET</code><br>脚本文本支持 <code>\\r</code>、<code>\\n</code>、<code>\\t</code> 转义。</div>";
+  html += "<textarea name='script'>" + htmlEscape(scriptBody) + "</textarea>";
+  html += "<div class='actions'>";
+  html += "<button type='submit' formaction='/script/save'>保存到 SD</button>";
+  html += "<button type='submit' formaction='/script/run'>立即执行</button>";
+  html += "<a href='/download?file=/scripts/" + safeName + "' class='secondary'>下载当前脚本</a>";
+  html += "</div></form>";
+  if (runLog.length() > 0) {
+    html += "<h3>执行日志</h3><pre>" + htmlEscape(runLog) + "</pre>";
+  }
+  html += "</div>";
+
+  html += "<div class='panel'>";
+  html += "<h3>已保存脚本</h3>";
+  html += buildScriptFileListHtml(safeName);
+  html += "<h3>编写建议</h3>";
+  html += "<ul>";
+  html += "<li>串口发送默认走安全校验，适合 AT 指令和调试命令。</li>";
+  html += "<li>执行顺序为同步逐行执行，遇到错误会立即停止。</li>";
+  html += "<li>较长脚本建议先保存到 SD，再加载执行。</li>";
+  html += "<li>断电和复位类动作会直接影响目标设备状态，请谨慎执行。</li>";
+  html += "</ul></div></div></div></body></html>";
+  client.print(html);
+}
+
+void handleScriptPage(WiFiClient client, String requestLine) {
+  String requestedName = sanitizeScriptName(getQueryValue(requestLine, "name"));
+  String scriptBody = readScriptFileContent(buildScriptPath(requestedName));
+  if (scriptBody.length() == 0) {
+    scriptBody = defaultScriptTemplate();
+  }
+  renderScriptPage(client, requestedName, scriptBody, sdCardReady ? "" : "SD 卡未就绪，当前页面可编辑和执行脚本，但无法保存。", sdCardReady, "");
+}
+
+void handleScriptSave(WiFiClient client, String postBody) {
+  String scriptName = sanitizeScriptName(getFormValue(postBody, "name"));
+  String scriptBody = getFormValue(postBody, "script");
+  bool saved = writeScriptFileContent(buildScriptPath(scriptName), scriptBody);
+  String message = saved ? "脚本已保存到 /scripts/" + scriptName : "脚本保存失败，请检查 SD 卡状态。";
+  renderScriptPage(client, scriptName, scriptBody, message, saved, "");
+}
+
+void handleScriptRun(WiFiClient client, String postBody) {
+  String scriptName = sanitizeScriptName(getFormValue(postBody, "name"));
+  String scriptBody = getFormValue(postBody, "script");
+  String runLog = "";
+  bool success = executeWebScript(scriptBody, runLog);
+  String message = success ? "脚本执行完成。" : "脚本执行失败，请查看执行日志。";
+  renderScriptPage(client, scriptName, scriptBody, message, success, runLog);
 }
 
 void handleNotFound(WiFiClient client) {
@@ -1702,38 +2255,8 @@ void handleSerialSend(WiFiClient client, String request) {
     lfPos += 3;
     addLf = (request.charAt(lfPos) == '1');
   }
-
-  bool explicitFrame = data.length() > 0 && data[0] == SECURITY_FRAME_HEADER_CHAR && data[data.length() - 1] == SECURITY_FRAME_TAIL_CHAR;
-  if (!explicitFrame) {
-    if (addCr) data += "\r";
-    if (addLf) data += "\n";
-  }
-
-  String payload = "";
-  String frame = explicitFrame ? data : buildSecureFrame(data);
   String errorReason = "";
-  webFrameBuffer = "";
-  bool payloadReady = frame.length() > 0 &&
-                      appendIngressChunk(SECURITY_SOURCE_WEB, -1, (const uint8_t *)frame.c_str(), frame.length(), errorReason) &&
-                      getValidatedPayload(SECURITY_SOURCE_WEB, -1, payload, errorReason);
-
-  if (payloadReady && payload.length() > 0) {
-    if (targetUart1) {
-      // 发向 UART1
-      sendValidatedPayloadToUART(UART_NUM_1, payload);
-    } else if (currentMode == MODE_SERVER) {
-      if (targetIndex >= 0 && targetIndex < MAX_CLIENTS) {
-        selectedClientIndex = targetIndex;
-        if (serverClients[targetIndex] && serverClients[targetIndex].connected()) {
-          sendFramedPayloadToClient(serverClients[targetIndex], payload);
-        }
-      } else {
-        sendValidatedPayloadToUART(UART_NUM_2, payload);
-      }
-    } else {
-      sendValidatedPayloadToUART(UART_NUM_2, payload);
-    }
-  }
+  executeWebPayload(data, targetUart1, targetIndex, addCr, addLf, errorReason);
   
   String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
   html += "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='0;url=/serial '></head></html>";
