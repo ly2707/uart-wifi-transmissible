@@ -20,6 +20,7 @@
 | [模块说明](modules/README.md) | 开发者 | 每个 .ino/.h 文件的职责、关键函数、扩展位置 |
 | [配置与接口](configuration/README.md) | 调试工程师、固件维护者 | 引脚表、EEPROM 布局、AT 指令、Web 配置入口 |
 | [构建、烧录与运维](operation/README.md) | 测试、交付、现场工程师 | 依赖、编译、烧录、启动流程、日志目录、Web 路由 |
+| [SecureCRT 自动化测试说明](operation/securecrt_automation.md) | 测试、现场运维、自动化工程师 | 飞腾 D3000 测试机的 SecureCRT 脚本、网页测试计划和自动化执行方法 |
 | [安全设计](security/README.md) | 固件开发、安全评审 | 安全帧、白名单、错误计数、超时与敏感信息脱敏 |
 
 ## 相关资源
@@ -30,6 +31,7 @@
 - [PCB 原始工程](../PCB/dual-mode-uart-enhanced_v0.8.dsn)
 - [Arduino CLI 编译脚本](../compile.ps1)
 - [一键烧录脚本](../build_and_flash.ps1)
+- [SecureCRT 自动化脚本](../scripts/securecrt/d3000_automation.vbs)
 
 ## 文档维护约定
 

@@ -36,6 +36,14 @@
 | compile_esp32.ps1 | 使用特定 arduino-cli 配置的编译脚本 |
 | compile_project.bat | 面向手工流程的辅助脚本 |
 
+### 2.3 SecureCRT 自动化测试资产
+
+| 资源 | 用途 |
+| --- | --- |
+| [scripts/securecrt/d3000_automation.vbs](../../scripts/securecrt/d3000_automation.vbs) | SecureCRT 自动化主脚本，用于飞腾 D3000 Linux 测试机的登录、控制和测试编排 |
+| [SecureCRT 自动化测试说明](securecrt_automation.md) | 脚本配置、网页计划格式、执行顺序和注意事项 |
+| [scripts/securecrt/plans/full_regression_plan.txt](../../scripts/securecrt/plans/full_regression_plan.txt) | 综合自动化回归模板 |
+
 ## 3. 烧录方式
 
 ```powershell
@@ -73,7 +81,10 @@
 | / | GET | 首页，总览入口 |
 | /status | GET | 系统状态页 |
 | /config | GET | 配置页 |
+| /script | GET | 网页脚本编程页，支持脚本编辑、保存和执行 |
 | /saveconfig | POST | 保存配置 |
+| /script/save | POST | 保存网页脚本到 SD 卡 |
+| /script/run | POST | 按行执行网页脚本 |
 | /serial | GET | 串口监视页 |
 | /serial/data | GET | 串口缓冲拉取接口 |
 | /serial/send | POST | Web 发送串口数据 |
@@ -86,7 +97,7 @@
 | /deletedir | GET | 删除目录 |
 | /client | GET | 服务器模式下的客户端详情页 |
 | /client/send | POST | 向指定客户端发送数据 |
-| /power | POST | 电源控制接口 |
+| /power | POST | 电源控制接口；不带 client_id 时控制本机，带 client_id 时向指定在线客户端下发远程电源控制指令 |
 
 说明：HTTP 请求头和请求体都带长度上限，超限会直接返回 413。
 
@@ -99,7 +110,7 @@ SD 卡目录会根据模式和串口通道自动区分：
 | /client_local | 客户端模式 UART2 日志 |
 | /client_u1 | 客户端模式 UART1 日志 |
 | /server/system | 服务器模式系统事件日志 |
-| /server/<client> | 服务器模式各客户端 UART2 日志 |
+| /server/&lt;client&gt; | 服务器模式各客户端 UART2 日志 |
 | /server/uart1 | 服务器模式 UART1 日志 |
 
 日志文件名格式：
@@ -155,4 +166,4 @@ SD 卡目录会根据模式和串口通道自动区分：
 
 ## 9. 建议阅读下一篇
 
-继续阅读 [安全设计](../security/README.md)，了解输入校验、帧格式和攻击缓解机制。
+如果需要做飞腾 D3000 调试机自动化联调，先阅读 [SecureCRT 自动化测试说明](securecrt_automation.md)；继续了解固件输入校验和攻击缓解机制，请阅读 [安全设计](../security/README.md)。
