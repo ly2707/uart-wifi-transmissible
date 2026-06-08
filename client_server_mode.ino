@@ -97,6 +97,64 @@ bool isServerControlPayload(const String &payload) {
          payload == "SERVER:BUSY";
 }
 
+bool executeRemotePowerAction(const String &action, String &resultMessage) {
+  if (action == "POWER_ON") {
+    powerOn();
+    resultMessage = "RESP:POWER_ON:OK";
+    return true;
+  }
+
+  if (action == "POWER_OFF") {
+    powerOff();
+    resultMessage = "RESP:POWER_OFF:OK";
+    return true;
+  }
+
+  if (action == "POWER_TRIGGER") {
+    triggerShutdown();
+    resultMessage = "RESP:POWER_TRIGGER:OK";
+    return true;
+  }
+
+  if (action == "CPU_RESET") {
+    resetCPU();
+    resultMessage = "RESP:CPU_RESET:OK";
+    return true;
+  }
+
+  resultMessage = "RESP:" + action + ":UNSUPPORTED";
+  return false;
+}
+
+bool sendRemotePowerActionToClient(int clientIndex, const String &action, String &resultMessage) {
+  if (currentMode != MODE_SERVER) {
+    resultMessage = "当前不是服务器模式，无法向客户端下发远程电源控制。";
+    return false;
+  }
+
+  if (clientIndex < 0 || clientIndex >= MAX_CLIENTS) {
+    resultMessage = "客户端索引无效。";
+    return false;
+  }
+
+  if (!serverClients[clientIndex] || !serverClients[clientIndex].connected()) {
+    resultMessage = "目标客户端当前不在线。";
+    return false;
+  }
+
+  String payload = "CMD:" + action;
+  if (!sendFramedPayloadToClient(serverClients[clientIndex], payload)) {
+    resultMessage = "远程控制命令发送失败。";
+    return false;
+  }
+
+  String displayClientId = connectedClientIds[clientIndex].length() > 0 ? connectedClientIds[clientIndex] : ("client_" + String(clientIndex));
+  clientSerialData[clientIndex] += "// Remote control queued: " + action + "\n";
+  clientLastSeenMillis[clientIndex] = millis();
+  resultMessage = "已向客户端 " + String(clientIndex) + " (" + displayClientId + ") 下发 " + action + " 指令。";
+  return true;
+}
+
 void startConfigMode() {
   Serial.println("\nEntering WiFi config mode...");
   Serial.println("Temporary config WiFi is active");
@@ -179,6 +237,25 @@ void handleValidatedClientPayload(const String &payload) {
       clientTcpFrameBuffer = "";
       clearSecurityState(clientTcpSecurityState);
       tcpConnected = false;
+    }
+    return;
+  }
+
+  if (payload.startsWith("CMD:")) {
+    String remoteAction = payload.substring(4);
+    remoteAction.trim();
+    remoteAction.toUpperCase();
+
+    String resultMessage;
+    bool handled = executeRemotePowerAction(remoteAction, resultMessage);
+    if (debugMode) {
+      Serial.println("[TCP remote cmd] " + payload + " => " + resultMessage);
+    }
+    if (tcpConnected) {
+      sendFramedPayloadToClient(tcpClient, resultMessage);
+    }
+    if (!handled) {
+      recordSecurityFailure(clientTcpSecurityState);
     }
     return;
   }

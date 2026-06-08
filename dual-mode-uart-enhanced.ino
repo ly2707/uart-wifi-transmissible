@@ -309,6 +309,8 @@ void handleSerialDataAPI(WiFiClient client, String request);
 void handleSerialSend(WiFiClient client, String request);
 void handleSerialClear(WiFiClient client, String postBody);
 void handlePowerControl(WiFiClient client, String request);
+bool executeRemotePowerAction(const String &action, String &resultMessage);
+bool sendRemotePowerActionToClient(int clientIndex, const String &action, String &resultMessage);
 // UART2 显示缓冲区操作
 void clearSerialBuffer();
 String takeSerialBufferSnapshot(bool clearBuffer);
@@ -323,6 +325,7 @@ void appendToSerial1Buffer(const char* str);
 void appendToSerial1Buffer(const char* str, int len);
 String formatFileSize(unsigned long bytes);
 String urlDecode(String input);
+String getFormValue(const String &body, const String &key);
 
 // 智能配网
 void startConfigMode();
